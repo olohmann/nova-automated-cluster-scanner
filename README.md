@@ -98,7 +98,7 @@ The GitHub Actions workflow builds and pushes the container image to GitHub Cont
 
 ### Creating Releases
 
-Use the **Prepare Release** workflow to create releases. This ensures the Helm chart version is updated before the release tag is created.
+Use the **Prepare Release** workflow to create releases. This ensures the Helm chart version and deploy manifests are updated before the release tag is created.
 
 **Via GitHub UI:**
 1. Go to **Actions** → **Prepare Release** → **Run workflow**
@@ -119,9 +119,10 @@ gh workflow run prepare-release.yaml -f version=0.2.0-rc1 -f prerelease=true
 prepare-release workflow
     ↓
 1. Updates Chart.yaml (version + appVersion)
-2. Commits: "chore: release vX.Y.Z"
-3. Creates git tag vX.Y.Z
-4. Creates GitHub release
+2. Updates deploy/cronjob.yaml (image tag)
+3. Commits: "chore: release vX.Y.Z"
+4. Creates git tag vX.Y.Z
+5. Creates GitHub release
     ↓
 Triggers: build-push (container + binaries)
 Triggers: release-chart (Helm chart)
