@@ -51,14 +51,14 @@ helm upgrade nova-scanner charts/nova-scanner --namespace nova-scanner
 
 ### Chart Release Process
 
+The Helm chart version is automatically updated when creating a release via the **Prepare Release** workflow.
+
+For chart-only changes (templates, values):
 1. Make changes to `charts/nova-scanner/`
-2. Update `version` in `Chart.yaml` (bump for chart changes)
-3. Update `appVersion` in `Chart.yaml` (to match container image version)
-4. Commit and push to main branch
-5. The `release-chart.yaml` workflow automatically:
-   - Packages the chart
-   - Creates a GitHub release for the chart
-   - Publishes to gh-pages branch for Helm repo
+2. Commit and push to main branch
+3. The `release-chart.yaml` workflow automatically publishes if chart version changed
+
+The chart is published to gh-pages branch and available via Helm repo.
 
 ### Using the Published Chart
 
@@ -75,20 +75,48 @@ helm install nova-scanner nova-scanner/nova-scanner --namespace nova-scanner --c
 
 ## Release Process
 
-### Application Release
+Releases are created using the **Prepare Release** workflow which ensures the Helm chart version is updated before the release tag is created.
 
-1. Make code changes
-2. Run tests: `make test`
-3. Commit and push to main
-4. Create release: `gh release create v0.x.x --generate-notes`
-5. Workflow builds and pushes container image to ghcr.io
+### Creating a Release (Recommended)
 
-### Chart Release
+Use the GitHub Actions workflow:
 
-1. Update chart in `charts/nova-scanner/`
-2. Bump `version` in `Chart.yaml`
-3. Update `appVersion` to match latest release
-4. Push to main - chart is automatically released
+1. Go to **Actions** → **Prepare Release** → **Run workflow**
+2. Enter the version (e.g., `0.2.0` or `0.2.0-rc1`)
+3. Check "Mark as pre-release" if applicable
+4. Click **Run workflow**
+
+The workflow will:
+1. Update `Chart.yaml` with the new version
+2. Commit the changes
+3. Create and push the git tag
+4. Create the GitHub release
+
+This triggers:
+- **Build and Push** workflow: builds container image and binaries
+- **Release Chart** workflow: publishes Helm chart to gh-pages
+
+### Creating a Release (CLI)
+
+```bash
+# Run the prepare-release workflow via CLI
+gh workflow run prepare-release.yaml -f version=0.2.0
+
+# Or for a pre-release
+gh workflow run prepare-release.yaml -f version=0.2.0-rc1 -f prerelease=true
+```
+
+### Manual Release (Not Recommended)
+
+If you need to create a release manually:
+
+1. Update `charts/nova-scanner/Chart.yaml`:
+   - `version: X.Y.Z`
+   - `appVersion: "vX.Y.Z"`
+2. Commit: `git commit -m "chore: release vX.Y.Z"`
+3. Tag: `git tag -a vX.Y.Z -m "Release vX.Y.Z"`
+4. Push: `git push && git push --tags`
+5. Create release: `gh release create vX.Y.Z --generate-notes`
 
 ## Dependencies
 
