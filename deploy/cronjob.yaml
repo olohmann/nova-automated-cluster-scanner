@@ -28,7 +28,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: scanner
-              image: ghcr.io/olohmann/nova-automated-cluster-scanner:latest
+              image: ghcr.io/olohmann/nova-automated-cluster-scanner:v0.2.0
               imagePullPolicy: Always
               args:
                 - --config=/config/config.yaml

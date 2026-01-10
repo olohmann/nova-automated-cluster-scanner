@@ -51,12 +51,23 @@ jobs:
           echo "Updated Chart.yaml:"
           grep -E "^(version|appVersion):" charts/nova-scanner/Chart.yaml
 
+      - name: Update deploy/cronjob.yaml image tag
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          TAG="v${VERSION}"
+
+          # Update image tag in cronjob.yaml
+          sed -i "s|image: ghcr.io/olohmann/nova-automated-cluster-scanner:.*|image: ghcr.io/olohmann/nova-automated-cluster-scanner:${TAG}|" deploy/cronjob.yaml
+
+          echo "Updated deploy/cronjob.yaml:"
+          grep "image:" deploy/cronjob.yaml
+
       - name: Commit version bump
         run: |
           VERSION="${{ github.event.inputs.version }}"
           TAG="v${VERSION}"
 
-          git add charts/nova-scanner/Chart.yaml
+          git add charts/nova-scanner/Chart.yaml deploy/cronjob.yaml
           git commit -m "chore: release ${TAG}"
           git push
 
