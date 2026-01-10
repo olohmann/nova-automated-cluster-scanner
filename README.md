@@ -94,20 +94,7 @@ make dry-run
 
 ## CI/CD Setup
 
-The GitHub Actions workflow builds and pushes the container image to Azure Container Registry.
-
-### Configure GitHub Secrets
-
-Use the GitHub CLI and Azure CLI to set up the required secrets:
-
-```bash
-ACR_NAME="myregistry"
-gh secret set ACR_REGISTRY --body "${ACR_NAME}.azurecr.io"
-gh secret set ACR_USERNAME --body "$(az acr credential show -n $ACR_NAME --query username -o tsv)"
-gh secret set ACR_PASSWORD --body "$(az acr credential show -n $ACR_NAME --query 'passwords[0].value' -o tsv)"
-```
-
-> **Note**: Requires ACR admin user to be enabled: `az acr update -n $ACR_NAME --admin-enabled true`
+The GitHub Actions workflow builds and pushes the container image to GitHub Container Registry (ghcr.io).
 
 ### Creating Releases
 
@@ -125,10 +112,10 @@ gh release create v0.1.0-rc1 --title "v0.1.0-rc1" --prerelease --generate-notes
 ```
 
 This produces container image tags:
-- `myregistry.azurecr.io/nova-scanner:0.1.0` (full version)
-- `myregistry.azurecr.io/nova-scanner:0.1` (minor)
-- `myregistry.azurecr.io/nova-scanner:0` (major)
-- `myregistry.azurecr.io/nova-scanner:latest` (from main branch)
+- `ghcr.io/olohmann/nova-automated-cluster-scanner:0.1.0` (full version)
+- `ghcr.io/olohmann/nova-automated-cluster-scanner:0.1` (minor)
+- `ghcr.io/olohmann/nova-automated-cluster-scanner:0` (major)
+- `ghcr.io/olohmann/nova-automated-cluster-scanner:latest` (from main branch)
 
 ## Configuration
 

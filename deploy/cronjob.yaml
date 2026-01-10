@@ -28,7 +28,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: scanner
-              image: ghcr.io/olohmann/nova-scanner:latest
+              image: ghcr.io/olohmann/nova-automated-cluster-scanner:latest
               imagePullPolicy: Always
               args:
                 - --config=/config/config.yaml
@@ -50,7 +50,7 @@ spec:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true
                 runAsNonRoot: true
-                runAsUser: 65534
+                runAsUser: 10001
                 capabilities:
                   drop:
                     - ALL
