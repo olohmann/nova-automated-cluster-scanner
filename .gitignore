@@ -5,7 +5,7 @@ bin/
 *.dll
 *.so
 *.dylib
-nova-scanner
+/nova-scanner
 
 # Test artifacts
 *.test
@@ -53,6 +53,7 @@ config.local.yaml
 *.key
 *secret*
 !*_test.go
+!charts/**/secret.yaml
 
 # Debug files
 debug

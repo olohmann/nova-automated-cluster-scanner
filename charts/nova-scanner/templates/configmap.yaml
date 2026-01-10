@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "nova-scanner.fullname" . }}-config
+  labels:
+    {{- include "nova-scanner.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    scanHelm: {{ .Values.config.scanHelm }}
+    scanContainers: {{ .Values.config.scanContainers }}
+    minSeverity: {{ .Values.config.minSeverity }}
+    pollArtifactHub: {{ .Values.config.pollArtifactHub }}
+    logLevel: {{ .Values.config.logLevel }}
+    {{- if .Values.config.ignoreReleases }}
+    ignoreReleases:
+      {{- toYaml .Values.config.ignoreReleases | nindent 6 }}
+    {{- end }}
+    {{- if .Values.config.ignoreCharts }}
+    ignoreCharts:
+      {{- toYaml .Values.config.ignoreCharts | nindent 6 }}
+    {{- end }}
+    {{- if .Values.config.ignoreImages }}
+    ignoreImages:
+      {{- toYaml .Values.config.ignoreImages | nindent 6 }}
+    {{- end }}
+    {{- if .Values.config.pushgatewayUrl }}
+    pushgatewayUrl: {{ .Values.config.pushgatewayUrl | quote }}
+    {{- end }}
+    jobName: {{ .Values.config.jobName | quote }}
+    dryRun: {{ .Values.github.dryRun }}

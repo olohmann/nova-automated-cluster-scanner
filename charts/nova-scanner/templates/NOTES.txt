@@ -1,0 +1,41 @@
+Nova Scanner has been installed!
+
+Chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+Release: {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+
+The scanner is configured as a CronJob with the following schedule:
+  {{ .Values.cronjob.schedule }}
+
+To manually trigger a scan:
+  kubectl create job --from=cronjob/{{ include "nova-scanner.fullname" . }} {{ include "nova-scanner.fullname" . }}-manual -n {{ .Release.Namespace }}
+
+To view the logs of the last scan:
+  kubectl logs -l app.kubernetes.io/name={{ include "nova-scanner.name" . }} -n {{ .Release.Namespace }} --tail=100
+
+To check the CronJob status:
+  kubectl get cronjob {{ include "nova-scanner.fullname" . }} -n {{ .Release.Namespace }}
+
+To list recent jobs:
+  kubectl get jobs -l app.kubernetes.io/name={{ include "nova-scanner.name" . }} -n {{ .Release.Namespace }}
+
+{{- if not .Values.existingSecret }}
+{{- if or (not .Values.github.token) (not .Values.github.owner) (not .Values.github.repo) }}
+
+WARNING: GitHub credentials are not fully configured!
+The scanner needs the following to create issues:
+  - github.token: GitHub personal access token
+  - github.owner: Repository owner
+  - github.repo: Repository name
+
+Either set these values or use existingSecret to reference a pre-created secret.
+{{- end }}
+{{- end }}
+
+{{- if .Values.github.dryRun }}
+
+NOTE: Dry-run mode is enabled. No GitHub issues will be created.
+{{- end }}
+
+For more information, visit:
+  https://github.com/olohmann/nova-automated-cluster-scanner

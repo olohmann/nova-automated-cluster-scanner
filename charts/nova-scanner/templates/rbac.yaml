@@ -1,0 +1,40 @@
+{{- if .Values.rbac.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "nova-scanner.fullname" . }}
+  labels:
+    {{- include "nova-scanner.labels" . | nindent 4 }}
+rules:
+  # Read Helm secrets (Helm 3 storage)
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+  # Read Helm configmaps (Helm 2 storage)
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list"]
+  # Read pods for container scanning
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  # Read deployments, statefulsets, daemonsets for workload info
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "nova-scanner.fullname" . }}
+  labels:
+    {{- include "nova-scanner.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "nova-scanner.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ include "nova-scanner.fullname" . }}
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

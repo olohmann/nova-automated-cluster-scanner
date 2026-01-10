@@ -1,0 +1,22 @@
+{{/*
+Note: This service is included for completeness but nova-scanner is a CronJob
+and doesn't expose a service endpoint. This could be used if metrics endpoint
+is added in the future.
+*/}}
+{{- if false }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nova-scanner.fullname" . }}
+  labels:
+    {{- include "nova-scanner.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "nova-scanner.selectorLabels" . | nindent 4 }}
+{{- end }}
