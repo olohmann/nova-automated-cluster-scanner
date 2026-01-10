@@ -35,7 +35,7 @@ COPY --from=builder /nova-scanner /nova-scanner
 COPY --from=builder /usr/local/bin/nova /usr/local/bin/nova
 
 # Create non-root user
-RUN adduser -D -u 65534 scanner
+RUN addgroup -g 10001 scanner && adduser -D -u 10001 -G scanner scanner
 
 # Run as non-root user
 USER scanner
