@@ -24,10 +24,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: main
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -148,28 +144,3 @@ jobs:
           - \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest\`
           "
           gh release edit ${{ github.event.release.tag_name }} --notes "${CURRENT_BODY}${IMAGE_INFO}"
-
-      - name: Update Helm chart version
-        if: github.event_name == 'release'
-        run: |
-          TAG=${{ github.event.release.tag_name }}
-          # Remove 'v' prefix for chart version (e.g., v0.1.4 -> 0.1.4)
-          CHART_VERSION="${TAG#v}"
-
-          # Update Chart.yaml
-          sed -i "s/^version: .*/version: ${CHART_VERSION}/" charts/nova-scanner/Chart.yaml
-          sed -i "s/^appVersion: .*/appVersion: \"${TAG}\"/" charts/nova-scanner/Chart.yaml
-
-          echo "Updated Chart.yaml:"
-          grep -E "^(version|appVersion):" charts/nova-scanner/Chart.yaml
-
-      - name: Commit and push Helm chart update
-        if: github.event_name == 'release'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          TAG=${{ github.event.release.tag_name }}
-          git add charts/nova-scanner/Chart.yaml
-          git commit -m "chore: update Helm chart to ${TAG}" || echo "No changes to commit"
-          git push
