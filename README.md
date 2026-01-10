@@ -98,24 +98,39 @@ The GitHub Actions workflow builds and pushes the container image to GitHub Cont
 
 ### Creating Releases
 
-Use GitHub Releases for versioned container images. Creating a release automatically triggers the build workflow.
+Use the **Prepare Release** workflow to create releases. This ensures the Helm chart version is updated before the release tag is created.
 
+**Via GitHub UI:**
+1. Go to **Actions** → **Prepare Release** → **Run workflow**
+2. Enter the version (e.g., `0.2.0`)
+3. Click **Run workflow**
+
+**Via CLI:**
 ```bash
-# Create a new release (auto-generates release notes from commits)
-gh release create v0.1.0 --title "v0.1.0" --generate-notes
-
-# Create a release with custom notes
-gh release create v0.1.0 --title "v0.1.0" --notes "Initial release"
+# Create a release
+gh workflow run prepare-release.yaml -f version=0.2.0
 
 # Create a pre-release
-gh release create v0.1.0-rc1 --title "v0.1.0-rc1" --prerelease --generate-notes
+gh workflow run prepare-release.yaml -f version=0.2.0-rc1 -f prerelease=true
 ```
 
-This produces container image tags:
-- `ghcr.io/olohmann/nova-automated-cluster-scanner:0.1.0` (full version)
-- `ghcr.io/olohmann/nova-automated-cluster-scanner:0.1` (minor)
-- `ghcr.io/olohmann/nova-automated-cluster-scanner:0` (major)
-- `ghcr.io/olohmann/nova-automated-cluster-scanner:latest` (from main branch)
+**Release Flow:**
+```
+prepare-release workflow
+    ↓
+1. Updates Chart.yaml (version + appVersion)
+2. Commits: "chore: release vX.Y.Z"
+3. Creates git tag vX.Y.Z
+4. Creates GitHub release
+    ↓
+Triggers: build-push (container + binaries)
+Triggers: release-chart (Helm chart)
+```
+
+**Produced artifacts:**
+- Container image: `ghcr.io/olohmann/nova-automated-cluster-scanner:vX.Y.Z`
+- Helm chart: `nova-scanner-X.Y.Z.tgz`
+- Binaries: linux/darwin/windows (amd64/arm64)
 
 ## Configuration
 

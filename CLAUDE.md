@@ -77,32 +77,38 @@ helm install nova-scanner nova-scanner/nova-scanner --namespace nova-scanner --c
 
 Releases are created using the **Prepare Release** workflow which ensures the Helm chart version is updated before the release tag is created.
 
+### Release Flow
+
+```
+gh workflow run prepare-release.yaml -f version=X.Y.Z
+                    ↓
+    prepare-release.yaml
+    ├── Updates Chart.yaml (version: X.Y.Z, appVersion: "vX.Y.Z")
+    ├── Commits: "chore: release vX.Y.Z"
+    ├── Creates tag vX.Y.Z on that commit
+    └── Creates GitHub release
+                    ↓
+         ┌─────────┴─────────┐
+         ↓                   ↓
+    build-push.yaml    release-chart.yaml
+    ├── Container image    └── Helm chart to gh-pages
+    └── Binaries (6 platforms)
+```
+
 ### Creating a Release (Recommended)
 
-Use the GitHub Actions workflow:
-
+**Via GitHub UI:**
 1. Go to **Actions** → **Prepare Release** → **Run workflow**
 2. Enter the version (e.g., `0.2.0` or `0.2.0-rc1`)
 3. Check "Mark as pre-release" if applicable
 4. Click **Run workflow**
 
-The workflow will:
-1. Update `Chart.yaml` with the new version
-2. Commit the changes
-3. Create and push the git tag
-4. Create the GitHub release
-
-This triggers:
-- **Build and Push** workflow: builds container image and binaries
-- **Release Chart** workflow: publishes Helm chart to gh-pages
-
-### Creating a Release (CLI)
-
+**Via CLI:**
 ```bash
-# Run the prepare-release workflow via CLI
+# Create a release
 gh workflow run prepare-release.yaml -f version=0.2.0
 
-# Or for a pre-release
+# Create a pre-release
 gh workflow run prepare-release.yaml -f version=0.2.0-rc1 -f prerelease=true
 ```
 
