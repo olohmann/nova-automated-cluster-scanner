@@ -1,0 +1,100 @@
+# Nova Scanner Configuration Example
+# Copy this file to config.yaml and adjust values as needed
+
+# =============================================================================
+# Kubernetes Configuration
+# =============================================================================
+
+# Path to kubeconfig file (leave empty for in-cluster config or default ~/.kube/config)
+kubeconfig: ""
+
+# Kubernetes context to use (leave empty for current context)
+context: ""
+
+# Namespaces to scan (empty = all namespaces)
+namespaces: []
+
+# =============================================================================
+# Scanning Options
+# =============================================================================
+
+# Enable Helm chart scanning
+scanHelm: true
+
+# Enable container image scanning
+scanContainers: true
+
+# Minimum severity to report: minor, major, critical
+# - minor: all version bumps (patch, minor, major)
+# - major: minor and major version bumps only
+# - critical: major version bumps only
+minSeverity: minor
+
+# Nova options
+pollArtifactHub: true
+
+# Desired versions override (pin specific charts to versions)
+# desiredVersions:
+#   ingress-nginx: 4.8.0
+#   cert-manager: 1.13.0
+
+# =============================================================================
+# Ignore Lists
+# =============================================================================
+
+# Helm releases to ignore (by release name)
+ignoreReleases: []
+#  - prometheus-stack
+#  - loki
+
+# Helm charts to ignore (by chart name)
+ignoreCharts: []
+#  - kube-prometheus-stack
+
+# Container images to ignore (supports glob patterns)
+ignoreImages:
+  - "*/pause:*"
+  - "*/coredns:*"
+
+# =============================================================================
+# GitHub Configuration
+# =============================================================================
+
+# GitHub personal access token (recommend using GITHUB_TOKEN env var instead)
+# githubToken: ""
+
+# GitHub repository owner
+# githubOwner: ""
+
+# GitHub repository name
+# githubRepo: ""
+
+# Dry-run mode: log issues that would be created without actually creating them
+dryRun: false
+
+# =============================================================================
+# Output Options
+# =============================================================================
+
+# Output mode: "github" (create issues) or "markdown" (print to stdout)
+outputMode: github
+
+# For markdown mode: output file path (empty = stdout)
+# markdownOutput: "issues.md"
+
+# =============================================================================
+# Metrics Configuration
+# =============================================================================
+
+# Prometheus Pushgateway URL (leave empty to disable metrics push)
+pushgatewayUrl: ""
+
+# Job name for Pushgateway metrics
+jobName: "nova-scanner"
+
+# =============================================================================
+# Logging
+# =============================================================================
+
+# Log level: debug, info, warn, error
+logLevel: info

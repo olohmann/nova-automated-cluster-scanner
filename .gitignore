@@ -1,0 +1,68 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+nova-scanner
+
+# Test artifacts
+*.test
+coverage.out
+coverage.html
+
+# Go workspace
+go.work
+go.work.sum
+
+# Dependency directories
+vendor/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+
+# Local configuration (use config.example.yaml as template)
+config.yaml
+config.local.yaml
+*.local.yaml
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Secrets (never commit these)
+*.pem
+*.key
+*secret*
+!*_test.go
+
+# Debug files
+debug
+*.log
+
+# Kubernetes local testing
+kubeconfig
+.kube/
+
+# Build artifacts
+dist/
+*.tar.gz
+*.zip

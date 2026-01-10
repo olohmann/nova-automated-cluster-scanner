@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nova-scanner-config
+  namespace: nova-scanner
+  labels:
+    app.kubernetes.io/name: nova-scanner
+data:
+  config.yaml: |
+    # Scanning options
+    scanHelm: true
+    scanContainers: false  # Enable when container scanning is implemented
+
+    # Severity filtering: minor, major, critical
+    # minor = all updates, major = minor+major version bumps, critical = major version bumps only
+    minSeverity: minor
+
+    # Nova options
+    pollArtifactHub: true
+
+    # Ignore lists
+    ignoreReleases: []
+    ignoreCharts: []
+    ignoreImages:
+      - "*/pause:*"
+      - "*/coredns:*"
+
+    # Metrics
+    pushgatewayUrl: "http://pushgateway.monitoring:9091"
+    jobName: "nova-scanner"
+
+    # Logging
+    logLevel: info
