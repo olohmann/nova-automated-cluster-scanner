@@ -116,16 +116,35 @@ gh workflow run prepare-release.yaml -f version=0.2.0-rc1 -f prerelease=true
 
 **Release Flow:**
 ```
-prepare-release workflow
-    ↓
-1. Updates Chart.yaml (version + appVersion)
-2. Updates deploy/cronjob.yaml (image tag)
-3. Commits: "chore: release vX.Y.Z"
-4. Creates git tag vX.Y.Z
-5. Creates GitHub release
-    ↓
-Triggers: build-push (container + binaries)
-Triggers: release-chart (Helm chart)
+Step 1: gh workflow run prepare-release.yaml -f version=X.Y.Z
+        ↓
+    prepare-release.yaml
+    ├── Updates Chart.yaml (version + appVersion)
+    ├── Updates deploy/cronjob.yaml (image tag)
+    ├── Commits: "chore: release vX.Y.Z"
+    ├── Creates tag vX.Y.Z
+    └── Creates GitHub release
+
+Step 2: Manually trigger build-push workflow (GitHub UI or CLI)
+        ↓
+    build-push.yaml (on release event)
+    ├── Builds container image → ghcr.io
+    └── Builds binaries → release assets
+
+Step 3: Helm chart auto-publishes (triggered by push to main)
+        ↓
+    release-chart.yaml
+    └── Publishes Helm chart to gh-pages
+```
+
+**Important:** Due to GitHub Actions limitations, workflows using `GITHUB_TOKEN` to create releases don't trigger other workflows. After running prepare-release, manually trigger build-push:
+
+```bash
+# After prepare-release completes, re-run build-push for the release
+gh run list --workflow=build-push.yaml --limit=1  # Find the run ID
+gh run rerun <run-id>
+
+# Or via GitHub UI: Actions → Build and Push → Re-run (select the release run)
 ```
 
 **Produced artifacts:**

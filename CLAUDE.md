@@ -75,24 +75,31 @@ helm install nova-scanner nova-scanner/nova-scanner --namespace nova-scanner --c
 
 ## Release Process
 
-Releases are created using the **Prepare Release** workflow which ensures the Helm chart version is updated before the release tag is created.
+Releases are created using the **Prepare Release** workflow which ensures the Helm chart version and deploy manifests are updated before the release tag is created.
+
+**Important:** Due to GitHub Actions limitations, workflows using `GITHUB_TOKEN` to create releases don't automatically trigger other workflows. The build-push workflow must be manually triggered after prepare-release.
 
 ### Release Flow
 
 ```
-gh workflow run prepare-release.yaml -f version=X.Y.Z
+Step 1: gh workflow run prepare-release.yaml -f version=X.Y.Z
                     ↓
     prepare-release.yaml
     ├── Updates Chart.yaml (version: X.Y.Z, appVersion: "vX.Y.Z")
+    ├── Updates deploy/cronjob.yaml (image tag)
     ├── Commits: "chore: release vX.Y.Z"
     ├── Creates tag vX.Y.Z on that commit
     └── Creates GitHub release
+
+Step 2: Manually trigger build-push (required for binaries)
                     ↓
-         ┌─────────┴─────────┐
-         ↓                   ↓
-    build-push.yaml    release-chart.yaml
-    ├── Container image    └── Helm chart to gh-pages
-    └── Binaries (6 platforms)
+    build-push.yaml (re-run for release event)
+    ├── Container image → ghcr.io
+    └── Binaries (6 platforms) → release assets
+
+Step 3: release-chart.yaml runs automatically (triggered by push)
+                    ↓
+    └── Helm chart → gh-pages
 ```
 
 ### Creating a Release (Recommended)
@@ -102,13 +109,18 @@ gh workflow run prepare-release.yaml -f version=X.Y.Z
 2. Enter the version (e.g., `0.2.0` or `0.2.0-rc1`)
 3. Check "Mark as pre-release" if applicable
 4. Click **Run workflow**
+5. **After completion:** Go to **Build and Push** workflow, find the latest run, click **Re-run all jobs**
 
 **Via CLI:**
 ```bash
-# Create a release
+# Step 1: Create the release
 gh workflow run prepare-release.yaml -f version=0.2.0
 
-# Create a pre-release
+# Step 2: Wait for prepare-release to complete, then re-run build-push
+gh run list --workflow=build-push.yaml --limit=1  # Note the run ID
+gh run rerun <run-id>
+
+# For pre-releases
 gh workflow run prepare-release.yaml -f version=0.2.0-rc1 -f prerelease=true
 ```
 
