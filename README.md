@@ -109,6 +109,27 @@ gh secret set ACR_PASSWORD --body "$(az acr credential show -n $ACR_NAME --query
 
 > **Note**: Requires ACR admin user to be enabled: `az acr update -n $ACR_NAME --admin-enabled true`
 
+### Creating Releases
+
+Use GitHub Releases for versioned container images. Creating a release automatically triggers the build workflow.
+
+```bash
+# Create a new release (auto-generates release notes from commits)
+gh release create v0.1.0 --title "v0.1.0" --generate-notes
+
+# Create a release with custom notes
+gh release create v0.1.0 --title "v0.1.0" --notes "Initial release"
+
+# Create a pre-release
+gh release create v0.1.0-rc1 --title "v0.1.0-rc1" --prerelease --generate-notes
+```
+
+This produces container image tags:
+- `myregistry.azurecr.io/nova-scanner:0.1.0` (full version)
+- `myregistry.azurecr.io/nova-scanner:0.1` (minor)
+- `myregistry.azurecr.io/nova-scanner:0` (major)
+- `myregistry.azurecr.io/nova-scanner:latest` (from main branch)
+
 ## Configuration
 
 Configuration can be provided via YAML file and/or environment variables.
