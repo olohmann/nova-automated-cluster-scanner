@@ -109,21 +109,8 @@ func (s *Scanner) ScanHelm(ctx context.Context) (*HelmScanResult, error) {
 		args = append(args, "--poll-artifacthub")
 	}
 
-	// Add kubeconfig - use explicit path to avoid tilde expansion issues
-	kubeconfig := s.config.Kubeconfig
-	if kubeconfig == "" {
-		// Check KUBECONFIG env var first
-		kubeconfig = os.Getenv("KUBECONFIG")
-	}
-	if kubeconfig == "" {
-		// Fall back to default path with expanded home directory
-		if home, err := os.UserHomeDir(); err == nil {
-			kubeconfig = home + "/.kube/config"
-		}
-	}
-	// Expand tilde in path if present
-	kubeconfig = expandTilde(kubeconfig)
-	if kubeconfig != "" {
+	// Add kubeconfig if not running in-cluster
+	if kubeconfig := getKubeconfig(s.config.Kubeconfig); kubeconfig != "" {
 		args = append(args, "--kubeconfig", kubeconfig)
 	}
 
@@ -210,21 +197,8 @@ func (s *Scanner) ScanContainers(ctx context.Context, skipNamespaces map[string]
 	// Build Nova command for container scanning
 	args := []string{"find", "--format", "json", "--containers"}
 
-	// Add kubeconfig - use explicit path to avoid tilde expansion issues
-	kubeconfig := s.config.Kubeconfig
-	if kubeconfig == "" {
-		// Check KUBECONFIG env var first
-		kubeconfig = os.Getenv("KUBECONFIG")
-	}
-	if kubeconfig == "" {
-		// Fall back to default path with expanded home directory
-		if home, err := os.UserHomeDir(); err == nil {
-			kubeconfig = home + "/.kube/config"
-		}
-	}
-	// Expand tilde in path if present
-	kubeconfig = expandTilde(kubeconfig)
-	if kubeconfig != "" {
+	// Add kubeconfig if not running in-cluster
+	if kubeconfig := getKubeconfig(s.config.Kubeconfig); kubeconfig != "" {
 		args = append(args, "--kubeconfig", kubeconfig)
 	}
 
@@ -388,6 +362,40 @@ func expandTilde(path string) string {
 		}
 	}
 	return path
+}
+
+// isRunningInCluster returns true if the process is running inside a Kubernetes cluster.
+// Detection is based on the presence of KUBERNETES_SERVICE_HOST environment variable,
+// which is automatically set by Kubernetes for all pods.
+func isRunningInCluster() bool {
+	return os.Getenv("KUBERNETES_SERVICE_HOST") != ""
+}
+
+// getKubeconfig determines the kubeconfig path to use.
+// Returns empty string when running in-cluster (nova will auto-detect).
+// Otherwise returns the configured path, KUBECONFIG env var, or default ~/.kube/config.
+func getKubeconfig(configuredPath string) string {
+	// If running in-cluster, return empty to let nova use in-cluster config
+	if isRunningInCluster() {
+		return ""
+	}
+
+	// Use explicitly configured path
+	if configuredPath != "" {
+		return expandTilde(configuredPath)
+	}
+
+	// Check KUBECONFIG env var
+	if envPath := os.Getenv("KUBECONFIG"); envPath != "" {
+		return expandTilde(envPath)
+	}
+
+	// Fall back to default path
+	if home, err := os.UserHomeDir(); err == nil {
+		return home + "/.kube/config"
+	}
+
+	return ""
 }
 
 // meetsMinSeverity checks if the version difference meets the minimum severity threshold.
