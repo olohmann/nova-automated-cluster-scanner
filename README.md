@@ -92,6 +92,23 @@ make dry-run
    make logs
    ```
 
+## CI/CD Setup
+
+The GitHub Actions workflow builds and pushes the container image to Azure Container Registry.
+
+### Configure GitHub Secrets
+
+Use the GitHub CLI and Azure CLI to set up the required secrets:
+
+```bash
+ACR_NAME="myregistry"
+gh secret set ACR_REGISTRY --body "${ACR_NAME}.azurecr.io"
+gh secret set ACR_USERNAME --body "$(az acr credential show -n $ACR_NAME --query username -o tsv)"
+gh secret set ACR_PASSWORD --body "$(az acr credential show -n $ACR_NAME --query 'passwords[0].value' -o tsv)"
+```
+
+> **Note**: Requires ACR admin user to be enabled: `az acr update -n $ACR_NAME --admin-enabled true`
+
 ## Configuration
 
 Configuration can be provided via YAML file and/or environment variables.
