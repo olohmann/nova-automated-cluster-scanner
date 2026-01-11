@@ -163,6 +163,15 @@ func (s *Scanner) ScanHelm(ctx context.Context) (*HelmScanResult, error) {
 	var outdated []ReleaseOutput
 	for _, release := range filtered {
 		if release.IsOld {
+			// Check if latest version matches a blacklisted pattern
+			if s.config.ShouldIgnoreVersion(release.Latest.Version) {
+				s.logger.Debug().
+					Str("release", release.ReleaseName).
+					Str("latestVersion", release.Latest.Version).
+					Msg("Skipping release: latest version matches blacklist pattern")
+				continue
+			}
+
 			// Apply severity filtering
 			if s.meetsMinSeverity(release.Installed.Version, release.Latest.Version) {
 				outdated = append(outdated, release)
@@ -242,6 +251,15 @@ func (s *Scanner) ScanContainers(ctx context.Context, skipNamespaces map[string]
 	var skipped []ContainerOutput
 	for _, container := range filtered {
 		if container.IsOld {
+			// Check if latest version matches a blacklisted pattern
+			if s.config.ShouldIgnoreVersion(container.LatestTag) {
+				s.logger.Debug().
+					Str("image", container.Name).
+					Str("latestTag", container.LatestTag).
+					Msg("Skipping container: latest version matches blacklist pattern")
+				continue
+			}
+
 			// Check if all affected workloads are in namespaces with outdated Helm releases
 			if s.shouldSkipContainerForHelm(container, skipNamespaces) {
 				skipped = append(skipped, container)

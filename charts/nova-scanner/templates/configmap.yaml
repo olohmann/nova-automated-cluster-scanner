@@ -23,6 +23,10 @@ data:
     ignoreImages:
       {{- toYaml .Values.config.ignoreImages | nindent 6 }}
     {{- end }}
+    {{- if .Values.config.ignoreVersionPatterns }}
+    ignoreVersionPatterns:
+      {{- toYaml .Values.config.ignoreVersionPatterns | nindent 6 }}
+    {{- end }}
     {{- if .Values.config.pushgatewayUrl }}
     pushgatewayUrl: {{ .Values.config.pushgatewayUrl | quote }}
     {{- end }}

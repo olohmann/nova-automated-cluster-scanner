@@ -170,6 +170,11 @@ ignoreReleases: []   # Helm releases to ignore
 ignoreCharts: []     # Chart names to ignore
 ignoreImages:        # Container images to ignore
   - "*/pause:*"
+ignoreVersionPatterns:  # Blacklist patterns for target versions
+  - "-develop"          # Skip versions like 9.2.0-develop.18
+  - "-rc"               # Skip release candidates
+  - "-alpha"            # Skip alpha releases
+  - "-beta"             # Skip beta releases
 
 # Severity: minor, major, critical
 minSeverity: minor

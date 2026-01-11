@@ -77,6 +77,13 @@ config:
   ignoreImages:
     - "*/pause:*"
     - "*/coredns:*"
+  # Version patterns to blacklist (skip unstable/preview releases)
+  ignoreVersionPatterns:
+    - "-develop"
+    - "-rc"
+    - "-alpha"
+    - "-beta"
+    - "-SNAPSHOT"
   # Prometheus Pushgateway URL (leave empty to disable)
   pushgatewayUrl: ""
   # Job name for Pushgateway metrics

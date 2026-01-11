@@ -16,11 +16,12 @@ type Config struct {
 	Namespaces []string `yaml:"namespaces"` // empty = all namespaces
 
 	// Scanning
-	ScanHelm       bool     `yaml:"scanHelm"`
-	ScanContainers bool     `yaml:"scanContainers"`
-	IgnoreReleases []string `yaml:"ignoreReleases"`
-	IgnoreCharts   []string `yaml:"ignoreCharts"`
-	IgnoreImages   []string `yaml:"ignoreImages"`
+	ScanHelm              bool     `yaml:"scanHelm"`
+	ScanContainers        bool     `yaml:"scanContainers"`
+	IgnoreReleases        []string `yaml:"ignoreReleases"`
+	IgnoreCharts          []string `yaml:"ignoreCharts"`
+	IgnoreImages          []string `yaml:"ignoreImages"`
+	IgnoreVersionPatterns []string `yaml:"ignoreVersionPatterns"` // Patterns to blacklist in target versions (e.g., "-develop", "-rc", "-alpha")
 
 	// Severity filtering: minor, major, critical
 	MinSeverity string `yaml:"minSeverity"`
@@ -170,4 +171,15 @@ func (c *Config) SeverityLevel() int {
 	default:
 		return 1 // minor
 	}
+}
+
+// ShouldIgnoreVersion returns true if the version matches any of the blacklist patterns.
+// Patterns are matched as substrings (e.g., "-develop" matches "9.2.0-develop.18").
+func (c *Config) ShouldIgnoreVersion(version string) bool {
+	for _, pattern := range c.IgnoreVersionPatterns {
+		if strings.Contains(version, pattern) {
+			return true
+		}
+	}
+	return false
 }

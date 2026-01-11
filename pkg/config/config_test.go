@@ -315,6 +315,74 @@ githubRepo: repo
 	}
 }
 
+func TestShouldIgnoreVersion(t *testing.T) {
+	tests := []struct {
+		name     string
+		patterns []string
+		version  string
+		want     bool
+	}{
+		{
+			name:     "no patterns",
+			patterns: nil,
+			version:  "9.2.0-develop.18",
+			want:     false,
+		},
+		{
+			name:     "matches develop pattern",
+			patterns: []string{"-develop"},
+			version:  "9.2.0-develop.18",
+			want:     true,
+		},
+		{
+			name:     "matches rc pattern",
+			patterns: []string{"-rc", "-alpha", "-beta"},
+			version:  "1.0.0-rc1",
+			want:     true,
+		},
+		{
+			name:     "matches alpha pattern",
+			patterns: []string{"-rc", "-alpha", "-beta"},
+			version:  "2.0.0-alpha.5",
+			want:     true,
+		},
+		{
+			name:     "matches beta pattern",
+			patterns: []string{"-rc", "-alpha", "-beta"},
+			version:  "3.0.0-beta",
+			want:     true,
+		},
+		{
+			name:     "does not match stable version",
+			patterns: []string{"-develop", "-rc", "-alpha", "-beta"},
+			version:  "1.2.3",
+			want:     false,
+		},
+		{
+			name:     "does not match different prerelease",
+			patterns: []string{"-develop"},
+			version:  "1.0.0-rc1",
+			want:     false,
+		},
+		{
+			name:     "matches snapshot pattern",
+			patterns: []string{"-SNAPSHOT"},
+			version:  "1.0.0-SNAPSHOT",
+			want:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{IgnoreVersionPatterns: tt.patterns}
+			got := cfg.ShouldIgnoreVersion(tt.version)
+			if got != tt.want {
+				t.Errorf("ShouldIgnoreVersion(%q) = %v, want %v", tt.version, got, tt.want)
+			}
+		})
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsAt(s, substr, 0))
 }
