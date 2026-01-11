@@ -2,8 +2,8 @@ apiVersion: v2
 name: nova-scanner
 description: A Helm chart for Nova Automated Cluster Scanner - detects outdated Helm charts and container images
 type: application
-version: 0.2.2
-appVersion: "v0.2.2"
+version: 0.3.0
+appVersion: "v0.3.0"
 keywords:
   - kubernetes
   - helm
