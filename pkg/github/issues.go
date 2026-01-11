@@ -12,8 +12,10 @@ import (
 )
 
 const (
-	labelNovaScan   = "nova-scan"
-	labelClaudeCode = "claude-code"
+	labelNovaScan        = "nova-scan"
+	labelClaudeCode      = "claude-code"
+	labelHelmUpdate      = "helm-update"
+	labelContainerUpdate = "container-update"
 )
 
 // IssueManager handles GitHub issue creation and deduplication.
@@ -68,7 +70,7 @@ func (im *IssueManager) CreateHelmIssue(ctx context.Context, release nova.Releas
 	issue, _, err := im.client.Issues.Create(ctx, im.owner, im.repo, &github.IssueRequest{
 		Title:  github.String(title),
 		Body:   github.String(body),
-		Labels: &[]string{labelNovaScan, labelClaudeCode},
+		Labels: &[]string{labelNovaScan, labelClaudeCode, labelHelmUpdate},
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to create issue: %w", err)
@@ -103,7 +105,7 @@ func (im *IssueManager) CreateContainerIssue(ctx context.Context, container nova
 	issue, _, err := im.client.Issues.Create(ctx, im.owner, im.repo, &github.IssueRequest{
 		Title:  github.String(title),
 		Body:   github.String(body),
-		Labels: &[]string{labelNovaScan, labelClaudeCode},
+		Labels: &[]string{labelNovaScan, labelClaudeCode, labelContainerUpdate},
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to create issue: %w", err)

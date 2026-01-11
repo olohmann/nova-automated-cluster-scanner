@@ -226,14 +226,18 @@ desiredVersions: {}  # Override target versions
 
 Issues are created with the following format:
 
-**Title**: `[Nova] Update Helm chart: <name> (<current> → <latest>)`
+**Helm Chart Updates:**
+- **Title**: `[Nova] Update Helm chart: <name> (<current> → <latest>)`
+- **Labels**: `nova-scan`, `claude-code`, `helm-update`
 
-**Labels**: `nova-scan`, `claude-code`
+**Container Image Updates:**
+- **Title**: `[Nova] Update container image: <name> (<current> → <latest>)`
+- **Labels**: `nova-scan`, `claude-code`, `container-update`
 
 **Body** includes:
 - Version information table
 - Update checklist (Flux-aware)
-- HelmRelease update snippet
+- HelmRelease update snippet (Helm) / Affected workloads (Container)
 - Useful commands
 
 ## Grafana Dashboard
