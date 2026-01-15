@@ -1,3 +1,28 @@
 apiVersion: v1
-entries: {}
-generated: "2026-01-15T21:00:00Z"
+entries:
+  nova-scanner:
+  - apiVersion: v2
+    appVersion: v0.4.0
+    created: "2026-01-15T22:23:57.635233+01:00"
+    description: A Helm chart for Nova Automated Cluster Scanner - detects outdated
+      Helm charts and container images
+    digest: 14bdd4e2a0fa26acde1bdfd91de75baba7bbd04f3a806749b87bc65732e760e3
+    home: https://github.com/olohmann/nova-automated-cluster-scanner
+    keywords:
+    - kubernetes
+    - helm
+    - scanner
+    - nova
+    - outdated
+    - security
+    maintainers:
+    - name: Oliver Lohmann
+      url: https://github.com/olohmann
+    name: nova-scanner
+    sources:
+    - https://github.com/olohmann/nova-automated-cluster-scanner
+    type: application
+    urls:
+    - https://github.com/olohmann/nova-automated-cluster-scanner/releases/download/nova-scanner-0.4.0/nova-scanner-0.4.0.tgz
+    version: 0.4.0
+generated: "2026-01-15T22:23:57.629249+01:00"
