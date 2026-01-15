@@ -57,6 +57,26 @@ ignoreImages:
   - "*/coredns:*"
 
 # =============================================================================
+# Version Filtering
+# =============================================================================
+
+# Global version patterns to ignore (applies to all charts and images)
+# Useful for filtering out pre-release versions
+ignoreVersionPatterns: []
+#  - "-rc"
+#  - "-alpha"
+#  - "-beta"
+#  - "-develop"
+
+# Per-chart version ignore patterns
+# Use this when a specific chart has non-standard versioning you want to filter
+# Example: Envoy Gateway used date-based versions (2023.9.18) before switching to semver (1.x.x)
+chartVersionIgnorePatterns: {}
+#  gateway-helm:            # Chart name (not release name)
+#    - "2023."              # Ignore old date-based versions
+#    - "2024."
+
+# =============================================================================
 # GitHub Configuration
 # =============================================================================
 

@@ -383,6 +383,97 @@ func TestShouldIgnoreVersion(t *testing.T) {
 	}
 }
 
+func TestShouldIgnoreChartVersion(t *testing.T) {
+	tests := []struct {
+		name                       string
+		globalPatterns             []string
+		chartVersionIgnorePatterns map[string][]string
+		chartName                  string
+		version                    string
+		want                       bool
+	}{
+		{
+			name:                       "no patterns at all",
+			globalPatterns:             nil,
+			chartVersionIgnorePatterns: nil,
+			chartName:                  "gateway-helm",
+			version:                    "2023.9.18",
+			want:                       false,
+		},
+		{
+			name:                       "matches global pattern",
+			globalPatterns:             []string{"-rc", "-alpha"},
+			chartVersionIgnorePatterns: nil,
+			chartName:                  "some-chart",
+			version:                    "1.0.0-rc1",
+			want:                       true,
+		},
+		{
+			name:           "matches chart-specific pattern",
+			globalPatterns: nil,
+			chartVersionIgnorePatterns: map[string][]string{
+				"gateway-helm": {"2023.", "2024."},
+			},
+			chartName: "gateway-helm",
+			version:   "2023.9.18",
+			want:      true,
+		},
+		{
+			name:           "does not match other chart's pattern",
+			globalPatterns: nil,
+			chartVersionIgnorePatterns: map[string][]string{
+				"gateway-helm": {"2023.", "2024."},
+			},
+			chartName: "other-chart",
+			version:   "2023.9.18",
+			want:      false,
+		},
+		{
+			name:           "stable version passes chart-specific filter",
+			globalPatterns: nil,
+			chartVersionIgnorePatterns: map[string][]string{
+				"gateway-helm": {"2023.", "2024."},
+			},
+			chartName: "gateway-helm",
+			version:   "1.6.1",
+			want:      false,
+		},
+		{
+			name:           "global pattern takes precedence",
+			globalPatterns: []string{"-develop"},
+			chartVersionIgnorePatterns: map[string][]string{
+				"some-chart": {"2023."},
+			},
+			chartName: "other-chart",
+			version:   "1.0.0-develop.5",
+			want:      true,
+		},
+		{
+			name:           "both global and chart-specific checked",
+			globalPatterns: []string{"-alpha"},
+			chartVersionIgnorePatterns: map[string][]string{
+				"gateway-helm": {"2023."},
+			},
+			chartName: "gateway-helm",
+			version:   "2023.9.18",
+			want:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				IgnoreVersionPatterns:      tt.globalPatterns,
+				ChartVersionIgnorePatterns: tt.chartVersionIgnorePatterns,
+			}
+			got := cfg.ShouldIgnoreChartVersion(tt.chartName, tt.version)
+			if got != tt.want {
+				t.Errorf("ShouldIgnoreChartVersion(%q, %q) = %v, want %v", tt.chartName, tt.version, got, tt.want)
+			}
+		})
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsAt(s, substr, 0))
 }

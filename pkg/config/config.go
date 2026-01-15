@@ -21,7 +21,8 @@ type Config struct {
 	IgnoreReleases        []string `yaml:"ignoreReleases"`
 	IgnoreCharts          []string `yaml:"ignoreCharts"`
 	IgnoreImages          []string `yaml:"ignoreImages"`
-	IgnoreVersionPatterns []string `yaml:"ignoreVersionPatterns"` // Patterns to blacklist in target versions (e.g., "-develop", "-rc", "-alpha")
+	IgnoreVersionPatterns      []string            `yaml:"ignoreVersionPatterns"`      // Patterns to blacklist in target versions (e.g., "-develop", "-rc", "-alpha")
+	ChartVersionIgnorePatterns map[string][]string `yaml:"chartVersionIgnorePatterns"` // Per-chart version ignore patterns (chart name -> patterns)
 
 	// Severity filtering: minor, major, critical
 	MinSeverity string `yaml:"minSeverity"`
@@ -179,6 +180,25 @@ func (c *Config) ShouldIgnoreVersion(version string) bool {
 	for _, pattern := range c.IgnoreVersionPatterns {
 		if strings.Contains(version, pattern) {
 			return true
+		}
+	}
+	return false
+}
+
+// ShouldIgnoreChartVersion returns true if the version should be ignored for a specific chart.
+// It checks both global ignoreVersionPatterns and chart-specific chartVersionIgnorePatterns.
+func (c *Config) ShouldIgnoreChartVersion(chartName, version string) bool {
+	// First check global patterns
+	if c.ShouldIgnoreVersion(version) {
+		return true
+	}
+
+	// Then check chart-specific patterns
+	if patterns, ok := c.ChartVersionIgnorePatterns[chartName]; ok {
+		for _, pattern := range patterns {
+			if strings.Contains(version, pattern) {
+				return true
+			}
 		}
 	}
 	return false

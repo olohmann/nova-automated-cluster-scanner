@@ -163,10 +163,11 @@ func (s *Scanner) ScanHelm(ctx context.Context) (*HelmScanResult, error) {
 	var outdated []ReleaseOutput
 	for _, release := range filtered {
 		if release.IsOld {
-			// Check if latest version matches a blacklisted pattern
-			if s.config.ShouldIgnoreVersion(release.Latest.Version) {
+			// Check if latest version matches a blacklisted pattern (global or chart-specific)
+			if s.config.ShouldIgnoreChartVersion(release.ChartName, release.Latest.Version) {
 				s.logger.Debug().
 					Str("release", release.ReleaseName).
+					Str("chart", release.ChartName).
 					Str("latestVersion", release.Latest.Version).
 					Msg("Skipping release: latest version matches blacklist pattern")
 				continue
