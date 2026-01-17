@@ -168,3 +168,14 @@ jobs:
           - \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest\`
           "
           gh release edit "${TAG}" --notes "${CURRENT_BODY}${IMAGE_INFO}"
+
+      - name: Trigger Helm chart release
+        if: steps.release-tag.outputs.is_release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Trigger the release-chart workflow after Docker image is pushed
+          # This ensures the image is available before the Helm chart is released
+          gh api repos/${{ github.repository }}/dispatches \
+            -f event_type=release-chart
+          echo "Triggered Helm chart release workflow"

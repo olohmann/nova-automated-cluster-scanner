@@ -7,6 +7,8 @@ on:
     paths:
       - 'charts/**'
   workflow_dispatch:
+  repository_dispatch:
+    types: [release-chart]
 
 jobs:
   release:
