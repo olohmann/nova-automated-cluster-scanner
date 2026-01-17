@@ -93,6 +93,20 @@ jobs:
             gh release create "${TAG}" --title "${TAG}" --generate-notes
           fi
 
+      - name: Trigger build-push workflow
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          TAG="v${VERSION}"
+
+          # Trigger the build-push workflow via repository_dispatch
+          gh api repos/${{ github.repository }}/dispatches \
+            -f event_type=release-build \
+            -f client_payload[tag]="${TAG}"
+
+          echo "Triggered build-push workflow for ${TAG}"
+
       - name: Summary
         run: |
           VERSION="${{ github.event.inputs.version }}"
