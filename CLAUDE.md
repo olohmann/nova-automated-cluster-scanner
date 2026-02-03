@@ -49,17 +49,6 @@ helm install nova-scanner charts/nova-scanner --namespace nova-scanner --create-
 helm upgrade nova-scanner charts/nova-scanner --namespace nova-scanner
 ```
 
-### Chart Release Process
-
-The Helm chart version is automatically updated when creating a release via the **Prepare Release** workflow.
-
-For chart-only changes (templates, values):
-1. Make changes to `charts/nova-scanner/`
-2. Commit and push to main branch
-3. The `release-chart.yaml` workflow automatically publishes if chart version changed
-
-The chart is published to gh-pages branch and available via Helm repo.
-
 ### Using the Published Chart
 
 ```bash
@@ -73,68 +62,107 @@ helm repo update
 helm install nova-scanner nova-scanner/nova-scanner --namespace nova-scanner --create-namespace
 ```
 
+## CI/CD Workflows
+
+### CI Workflow (`ci.yaml`)
+
+Runs on every push to `main` and on pull requests. Jobs:
+- **lint** - Run golangci-lint
+- **test** - Run tests with race detector
+- **build** - Build binary and Docker image (no push)
+- **helm-lint** - Lint the Helm chart
+
+### CD Workflow (`cd.yaml`)
+
+Triggered by pushing a `v*` tag (e.g., `v1.2.3`). All jobs run in a single workflow:
+1. **prepare** - Extract and validate version from tag
+2. **test** - Run tests
+3. **docker** - Build and push to GHCR (tags: `vX.Y.Z`, `<sha>`, `latest` if not prerelease)
+4. **binaries** - Build for 5 platforms (linux/darwin/windows × amd64/arm64)
+5. **release** - Create GitHub Release with binaries
+6. **helm** - Publish chart to gh-pages
+
 ## Release Process
 
-Releases are created using the **Prepare Release** workflow which ensures the Helm chart version and deploy manifests are updated before the release tag is created.
+Use the `/release` skill in Claude Code to create releases.
 
-**Important:** Due to GitHub Actions limitations, workflows using `GITHUB_TOKEN` to create releases don't automatically trigger other workflows. The build-push workflow must be manually triggered after prepare-release.
+### Creating a Release
+
+```bash
+# In Claude Code, run:
+/release 0.5.0
+
+# For pre-releases:
+/release 0.5.0-rc1
+```
+
+The skill will:
+1. Validate the version format
+2. Check for clean git state
+3. Update `charts/nova-scanner/Chart.yaml` (version + appVersion)
+4. Update `deploy/cronjob.yaml` (image tag)
+5. Show diff for review
+6. Commit: `release: v0.5.0`
+7. Create annotated tag: `v0.5.0`
+8. Push commit and tag (triggers CD workflow)
 
 ### Release Flow
 
 ```
-Step 1: gh workflow run prepare-release.yaml -f version=X.Y.Z
-                    ↓
-    prepare-release.yaml
-    ├── Updates Chart.yaml (version: X.Y.Z, appVersion: "vX.Y.Z")
-    ├── Updates deploy/cronjob.yaml (image tag)
-    ├── Commits: "chore: release vX.Y.Z"
-    ├── Creates tag vX.Y.Z on that commit
-    └── Creates GitHub release
-
-Step 2: Manually trigger build-push (required for binaries)
-                    ↓
-    build-push.yaml (re-run for release event)
-    ├── Container image → ghcr.io
-    └── Binaries (6 platforms) → release assets
-
-Step 3: release-chart.yaml runs automatically (triggered by push)
-                    ↓
-    └── Helm chart → gh-pages
+/release 0.5.0
+     │
+     ▼
+┌─────────────────────┐
+│ Claude Skill        │
+│ • Update Chart.yaml │
+│ • Update cronjob    │
+│ • Commit & Tag      │
+│ • Push              │
+└─────────────────────┘
+     │
+     ▼ (tag triggers cd.yaml)
+┌─────────────────────┐
+│ CD Workflow         │
+│ • Test              │
+│ • Docker → GHCR     │
+│ • Binaries → Release│
+│ • Helm → gh-pages   │
+└─────────────────────┘
 ```
 
-### Creating a Release (Recommended)
+### Monitoring a Release
 
-**Via GitHub UI:**
-1. Go to **Actions** → **Prepare Release** → **Run workflow**
-2. Enter the version (e.g., `0.2.0` or `0.2.0-rc1`)
-3. Check "Mark as pre-release" if applicable
-4. Click **Run workflow**
-5. **After completion:** Go to **Build and Push** workflow, find the latest run, click **Re-run all jobs**
-
-**Via CLI:**
 ```bash
-# Step 1: Create the release
-gh workflow run prepare-release.yaml -f version=0.2.0
-
-# Step 2: Wait for prepare-release to complete, then re-run build-push
-gh run list --workflow=build-push.yaml --limit=1  # Note the run ID
-gh run rerun <run-id>
-
-# For pre-releases
-gh workflow run prepare-release.yaml -f version=0.2.0-rc1 -f prerelease=true
+# Watch the CD workflow
+gh run list --workflow=cd.yaml --limit=1
+gh run watch
 ```
 
-### Manual Release (Not Recommended)
+### Verifying a Release
 
-If you need to create a release manually:
+```bash
+# Check GitHub release exists with binaries
+gh release view v0.5.0
 
-1. Update `charts/nova-scanner/Chart.yaml`:
-   - `version: X.Y.Z`
-   - `appVersion: "vX.Y.Z"`
-2. Commit: `git commit -m "chore: release vX.Y.Z"`
-3. Tag: `git tag -a vX.Y.Z -m "Release vX.Y.Z"`
-4. Push: `git push && git push --tags`
-5. Create release: `gh release create vX.Y.Z --generate-notes`
+# Check Docker image is available
+docker pull ghcr.io/olohmann/nova-automated-cluster-scanner:v0.5.0
+
+# Check Helm chart is available
+helm repo update nova-scanner
+helm search repo nova-scanner --versions | grep 0.5.0
+```
+
+### Prerelease Support
+
+Versions with a hyphen (e.g., `1.2.3-rc1`, `1.2.3-beta`) are treated as prereleases:
+- GitHub Release marked as prerelease
+- Docker image does NOT get `latest` tag
+
+### Prerequisites
+
+- `yq` v4+ installed locally (`brew install yq`)
+- gh-pages branch exists with Helm repo index
+- Repository has `packages:write` permission for GHCR
 
 ## Dependencies
 
