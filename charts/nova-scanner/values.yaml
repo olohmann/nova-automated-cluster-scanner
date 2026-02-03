@@ -84,6 +84,13 @@ config:
     - "-alpha"
     - "-beta"
     - "-SNAPSHOT"
+  # Per-chart version ignore patterns (chart name -> list of patterns)
+  # Example:
+  #   chartVersionIgnorePatterns:
+  #     gateway-helm:
+  #       - "2023."
+  #       - "2024."
+  chartVersionIgnorePatterns: {}
   # Prometheus Pushgateway URL (leave empty to disable)
   pushgatewayUrl: ""
   # Job name for Pushgateway metrics

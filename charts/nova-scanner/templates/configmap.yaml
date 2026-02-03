@@ -27,6 +27,10 @@ data:
     ignoreVersionPatterns:
       {{- toYaml .Values.config.ignoreVersionPatterns | nindent 6 }}
     {{- end }}
+    {{- if .Values.config.chartVersionIgnorePatterns }}
+    chartVersionIgnorePatterns:
+      {{- toYaml .Values.config.chartVersionIgnorePatterns | nindent 6 }}
+    {{- end }}
     {{- if .Values.config.pushgatewayUrl }}
     pushgatewayUrl: {{ .Values.config.pushgatewayUrl | quote }}
     {{- end }}
