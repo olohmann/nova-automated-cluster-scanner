@@ -57,6 +57,26 @@ func TestMatchGlob(t *testing.T) {
 		// Complex patterns
 		{"*/coredns:*", "k8s.gcr.io/coredns:1.8.0", true},
 		{"*/coredns:*", "docker.io/coredns/coredns:1.9.0", true},
+
+		// Bare image names (no / in input) — */name:* must match name:tag
+		{"*/memcached:*", "memcached:1.6.31-alpine", true},
+		{"*/busybox:*", "busybox:1.31.1", true},
+		{"*/nginx-unprivileged:*", "nginx-unprivileged:1.27.3", true},
+
+		// Registry-prefixed images — org/image:* must match docker.io/org/image:tag
+		{"grafana/rollout-operator:*", "docker.io/grafana/rollout-operator:v0.28.0", true},
+		{"grafana/rollout-operator:*", "grafana/rollout-operator:v0.28.0", true},
+
+		// Fully qualified registry patterns
+		{"registry.k8s.io/kube-apiserver:*", "registry.k8s.io/kube-apiserver:v1.32.0", true},
+		{"registry.k8s.io/sig-storage/csi-provisioner:v6*", "registry.k8s.io/sig-storage/csi-provisioner:v6.1.0", true},
+		{"registry.k8s.io/sig-storage/csi-provisioner:v6*", "registry.k8s.io/sig-storage/csi-provisioner:v5.3.0", false},
+		{"registry.k8s.io/sig-storage/csi-resizer:v2*", "registry.k8s.io/sig-storage/csi-resizer:v2.0.0", true},
+		{"registry.k8s.io/sig-storage/csi-resizer:v2*", "registry.k8s.io/sig-storage/csi-resizer:v1.14.0", false},
+
+		// Ensure non-matching cases still work
+		{"*/pause:*", "redis:6.0", false},
+		{"grafana/rollout-operator:*", "docker.io/grafana/mimir:2.15.0", false},
 	}
 
 	for _, tt := range tests {

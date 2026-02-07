@@ -350,21 +350,33 @@ func matchGlob(pattern, s string) bool {
 	if pattern == s {
 		return true
 	}
-	// Handle */name:* pattern
+	// Handle trailing * (prefix match)
+	if len(pattern) > 1 && pattern[len(pattern)-1] == '*' {
+		prefix := pattern[:len(pattern)-1]
+		if len(s) >= len(prefix) && s[:len(prefix)] == prefix {
+			return true
+		}
+	}
+	// Handle */ prefix pattern — match against every suffix after a /
 	if len(pattern) > 2 && pattern[0] == '*' && pattern[1] == '/' {
-		// Match anything before /
 		rest := pattern[2:]
+		// Also try matching directly (bare image name with no / at all)
+		if matchGlob(rest, s) {
+			return true
+		}
 		for i := 0; i < len(s); i++ {
 			if s[i] == '/' && matchGlob(rest, s[i+1:]) {
 				return true
 			}
 		}
 	}
-	// Handle *:* suffix pattern
-	if len(pattern) > 1 && pattern[len(pattern)-1] == '*' {
-		prefix := pattern[:len(pattern)-1]
-		if len(s) >= len(prefix) && s[:len(prefix)] == prefix {
-			return true
+	// For non-*/ patterns, also try matching against suffixes after /
+	// This handles "grafana/rollout-operator:*" vs "docker.io/grafana/rollout-operator:v0.28.0"
+	if len(pattern) > 0 && pattern[0] != '*' {
+		for i := 0; i < len(s); i++ {
+			if s[i] == '/' && matchGlob(pattern, s[i+1:]) {
+				return true
+			}
 		}
 	}
 	return false
