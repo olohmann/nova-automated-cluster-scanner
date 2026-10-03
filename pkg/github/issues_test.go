@@ -27,27 +27,6 @@ func TestBacktick(t *testing.T) {
 	}
 }
 
-func TestEscapeSearchQuery(t *testing.T) {
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{"normal text", "normal text"},
-		{`with "quotes"`, "with quotes"},
-		{`with \backslash`, "with backslash"},
-		{`"both" and \slash`, "both and slash"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			got := escapeSearchQuery(tt.input)
-			if got != tt.want {
-				t.Errorf("escapeSearchQuery(%q) = %q, want %q", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestFormatYAMLSnippet(t *testing.T) {
 	result := formatYAMLSnippet("2.0.0", "1.0.0")
 

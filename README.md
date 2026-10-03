@@ -6,7 +6,9 @@ Automated Kubernetes cluster scanner that detects outdated Helm charts and conta
 
 - **Helm Chart Scanning**: Detects outdated Helm releases by comparing against ArtifactHub
 - **GitHub Issue Creation**: Automatically creates issues with update checklists (Flux-aware)
-- **Issue Deduplication**: Prevents duplicate issues for already-tracked outdated components
+- **Issue Deduplication**: One issue per component — exact duplicates are skipped, a newer
+  version retitles the existing issue (keeping its labels and discussion) and closes older
+  ones as superseded, and issues closed as *not planned* are not re-opened
 - **Prometheus Metrics**: Exposes metrics for monitoring and alerting
 - **Severity Filtering**: Filter by minor, major, or critical version changes
 - **Dry-run Mode**: Test without creating actual GitHub issues
@@ -168,8 +170,8 @@ scanHelm: true       # Enable Helm chart scanning
 scanContainers: false # Enable container image scanning
 ignoreReleases: []   # Helm releases to ignore
 ignoreCharts: []     # Chart names to ignore
-ignoreImages:        # Container images to ignore
-  - "*/pause:*"
+ignoreImages:        # Container images to ignore (see "Ignoring images" below)
+  - "*/pause"
 ignoreVersionPatterns:  # Blacklist patterns for target versions
   - "-develop"          # Skip versions like 9.2.0-develop.18
   - "-rc"               # Skip release candidates
@@ -196,6 +198,22 @@ logLevel: info       # debug, info, warn, error
 pollArtifactHub: true
 desiredVersions: {}  # Override target versions
 ```
+
+### Ignoring images
+
+Nova reports container images by **name without tag** (e.g. `ghcr.io/fluxcd/helm-controller`)
+and the versions separately. Each `ignoreImages` pattern is matched against both
+`<name>` and `<name>:<proposed tag>`:
+
+| Pattern | Effect |
+|---------|--------|
+| `ghcr.io/fluxcd/*` | every image under `ghcr.io/fluxcd/` |
+| `ghcr.io/fluxcd/*:*` | same (the tag part matches any proposed tag) |
+| `*/busybox` | `busybox` from any registry/org, including bare `busybox` |
+| `grafana/rollout-operator` | also matches `docker.io/grafana/rollout-operator` |
+| `registry.k8s.io/sig-storage/csi-provisioner:v6*` | only proposed **v6.x** updates; v5.x updates are still reported |
+
+`*` matches any sequence of characters, including `/` and `:`.
 
 ### Environment Variables
 

@@ -22,8 +22,8 @@ data:
     ignoreReleases: []
     ignoreCharts: []
     ignoreImages:
-      - "*/pause:*"
-      - "*/coredns:*"
+      - "*/pause"
+      - "*/coredns"
 
     # Metrics
     pushgatewayUrl: "http://pushgateway.monitoring:9091"

@@ -77,6 +77,21 @@ func TestMatchGlob(t *testing.T) {
 		// Ensure non-matching cases still work
 		{"*/pause:*", "redis:6.0", false},
 		{"grafana/rollout-operator:*", "docker.io/grafana/mimir:2.15.0", false},
+
+		// Wildcards in the middle of a pattern
+		{"ghcr.io/fluxcd/*:*", "ghcr.io/fluxcd/helm-controller:v1.6.5", true},
+		{"ghcr.io/fluxcd/*:*", "ghcr.io/fluxcd/helm-controller", false},
+		{"ghcr.io/*/flannel", "ghcr.io/siderolabs/flannel", true},
+		{"ghcr.io/*/flannel", "ghcr.io/siderolabs/kubelet", false},
+
+		// Bare name patterns (nova reports image names without tags)
+		{"ghcr.io/fluxcd/*", "ghcr.io/fluxcd/kustomize-controller", true},
+		{"*/busybox", "docker.io/library/busybox", true},
+		{"*/busybox", "busybox", true},
+		{"*/busybox", "docker.io/library/busybox-extra", false},
+		{"registry.k8s.io/kube-apiserver", "registry.k8s.io/kube-apiserver", true},
+		{"registry.k8s.io/kube-apiserver", "registry.k8s.io/kube-apiserver-extra", false},
+		{"nginx:*", "nginx-unprivileged:1.27", false},
 	}
 
 	for _, tt := range tests {
@@ -207,11 +222,19 @@ func TestScanner_ShouldIgnoreRelease(t *testing.T) {
 
 func TestScanner_ShouldIgnoreContainer(t *testing.T) {
 	cfg := &config.Config{
-		IgnoreImages: []string{"*/pause:*", "*/coredns:*", "nginx:*"},
+		IgnoreImages: []string{
+			"*/pause:*",
+			"*/coredns",
+			"nginx:*",
+			"ghcr.io/fluxcd/*:*",
+			"registry.k8s.io/kube-apiserver",
+			"registry.k8s.io/sig-storage/csi-provisioner:v6*",
+		},
 	}
 	logger := logging.NewLogger("error")
 	scanner := &Scanner{config: cfg, logger: logger}
 
+	// Nova reports Name WITHOUT the tag; versions come in CurrentTag/LatestTag.
 	tests := []struct {
 		name      string
 		container ContainerOutput
@@ -219,23 +242,48 @@ func TestScanner_ShouldIgnoreContainer(t *testing.T) {
 	}{
 		{
 			name:      "not ignored",
-			container: ContainerOutput{Name: "redis:6.0"},
+			container: ContainerOutput{Name: "redis", CurrentTag: "6.0", LatestTag: "7.4"},
 			want:      false,
 		},
 		{
-			name:      "ignored pause",
-			container: ContainerOutput{Name: "k8s.gcr.io/pause:3.5"},
+			name:      "ignored pause (legacy :* pattern)",
+			container: ContainerOutput{Name: "k8s.gcr.io/pause", CurrentTag: "3.5", LatestTag: "3.10"},
 			want:      true,
 		},
 		{
-			name:      "ignored coredns",
-			container: ContainerOutput{Name: "docker.io/coredns/coredns:1.9.0"},
+			name:      "ignored coredns (bare pattern, registry prefix)",
+			container: ContainerOutput{Name: "registry.k8s.io/coredns/coredns", CurrentTag: "v1.14.2", LatestTag: "v1.14.7"},
 			want:      true,
 		},
 		{
-			name:      "ignored nginx prefix",
-			container: ContainerOutput{Name: "nginx:latest"},
+			name:      "ignored nginx (legacy :* pattern, bare image)",
+			container: ContainerOutput{Name: "nginx", CurrentTag: "1.27", LatestTag: "1.29"},
 			want:      true,
+		},
+		{
+			name:      "ignored flux controller (middle wildcard + :*)",
+			container: ContainerOutput{Name: "ghcr.io/fluxcd/helm-controller", CurrentTag: "v1.5.2", LatestTag: "v1.6.5"},
+			want:      true,
+		},
+		{
+			name:      "ignored control plane (exact bare name)",
+			container: ContainerOutput{Name: "registry.k8s.io/kube-apiserver", CurrentTag: "v1.35.7", LatestTag: "v1.37.1"},
+			want:      true,
+		},
+		{
+			name:      "version-specific ignore: proposed v6 is ignored",
+			container: ContainerOutput{Name: "registry.k8s.io/sig-storage/csi-provisioner", CurrentTag: "v5.3.0", LatestTag: "v6.3.0"},
+			want:      true,
+		},
+		{
+			name:      "version-specific ignore: proposed v5 patch is tracked",
+			container: ContainerOutput{Name: "registry.k8s.io/sig-storage/csi-provisioner", CurrentTag: "v5.3.0", LatestTag: "v5.4.0"},
+			want:      false,
+		},
+		{
+			name:      "nginx pattern does not swallow nginx-unprivileged",
+			container: ContainerOutput{Name: "docker.io/nginxinc/nginx-unprivileged", CurrentTag: "1.27", LatestTag: "1.31"},
+			want:      false,
 		},
 	}
 
