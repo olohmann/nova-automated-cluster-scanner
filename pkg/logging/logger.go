@@ -111,6 +111,26 @@ func (l *Logger) IssueDryRun(issueType, title string) {
 		Msg("Would create GitHub issue (dry-run mode)")
 }
 
+// IssueUpdated logs when an existing issue is retitled to a newer version.
+func (l *Logger) IssueUpdated(issueType, title, previousTitle, url string) {
+	l.Info().
+		Str("event", "issue_updated").
+		Str("issue_type", issueType).
+		Str("title", title).
+		Str("previous_title", previousTitle).
+		Str("url", url).
+		Msg("GitHub issue updated")
+}
+
+// IssueSuperseded logs when an older issue is closed in favour of another one.
+func (l *Logger) IssueSuperseded(number, supersededBy int) {
+	l.Info().
+		Str("event", "issue_superseded").
+		Int("issue", number).
+		Int("superseded_by", supersededBy).
+		Msg("GitHub issue closed as superseded")
+}
+
 // MetricsPushed logs when metrics are pushed to the pushgateway.
 func (l *Logger) MetricsPushed(url string) {
 	l.Info().

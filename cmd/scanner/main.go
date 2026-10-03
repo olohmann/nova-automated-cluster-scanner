@@ -104,14 +104,14 @@ func main() {
 				)
 			}
 
-			// Create issues for outdated releases
+			// Create or update issues for outdated releases
 			for _, release := range result.Outdated {
-				url, err := issueManager.CreateHelmIssue(ctx, release)
+				res, err := issueManager.CreateHelmIssue(ctx, release)
 				if err != nil {
 					logger.Error().Err(err).
 						Str("release", release.ReleaseName).
 						Msg("Failed to create issue")
-				} else if url != "" {
+				} else if res.Action == github.ActionCreated {
 					m.RecordIssueCreated("helm")
 				}
 			}
@@ -137,14 +137,14 @@ func main() {
 				)
 			}
 
-			// Create issues for outdated containers
+			// Create or update issues for outdated containers
 			for _, container := range result.Outdated {
-				url, err := issueManager.CreateContainerIssue(ctx, container)
+				res, err := issueManager.CreateContainerIssue(ctx, container)
 				if err != nil {
 					logger.Error().Err(err).
 						Str("image", container.Name).
 						Msg("Failed to create issue")
-				} else if url != "" {
+				} else if res.Action == github.ActionCreated {
 					m.RecordIssueCreated("container")
 				}
 			}

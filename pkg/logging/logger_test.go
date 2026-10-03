@@ -77,7 +77,9 @@ func TestLogger_OutputFormat(t *testing.T) {
 	os.Stdout = oldStdout
 
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatalf("failed to read captured output: %v", err)
+	}
 	output := buf.String()
 
 	// Parse as JSON
@@ -113,7 +115,9 @@ func TestLogger_ScanStart(t *testing.T) {
 	os.Stdout = oldStdout
 
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatalf("failed to read captured output: %v", err)
+	}
 	output := buf.String()
 
 	var logEntry map[string]interface{}
@@ -141,7 +145,9 @@ func TestLogger_ScanEnd(t *testing.T) {
 	os.Stdout = oldStdout
 
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatalf("failed to read captured output: %v", err)
+	}
 	output := buf.String()
 
 	var logEntry map[string]interface{}
@@ -175,7 +181,9 @@ func TestLogger_OutdatedFound(t *testing.T) {
 	os.Stdout = oldStdout
 
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatalf("failed to read captured output: %v", err)
+	}
 	output := buf.String()
 
 	var logEntry map[string]interface{}
@@ -209,7 +217,9 @@ func TestLogger_IssueCreated(t *testing.T) {
 	os.Stdout = oldStdout
 
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatalf("failed to read captured output: %v", err)
+	}
 	output := buf.String()
 
 	var logEntry map[string]interface{}
@@ -237,7 +247,9 @@ func TestLogger_IssueSkipped(t *testing.T) {
 	os.Stdout = oldStdout
 
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatalf("failed to read captured output: %v", err)
+	}
 	output := buf.String()
 
 	var logEntry map[string]interface{}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/Masterminds/semver/v3"
@@ -333,53 +334,77 @@ func (s *Scanner) shouldIgnoreRelease(release ReleaseOutput) bool {
 	return false
 }
 
+// shouldIgnoreContainer reports whether a container matches any ignoreImages pattern.
+//
+// Nova reports the image name without its tag (e.g. "ghcr.io/fluxcd/helm-controller")
+// and the versions separately. Patterns are therefore matched against both the bare
+// name and "name:<latest tag>", so that:
+//   - "ghcr.io/fluxcd/*" and "ghcr.io/fluxcd/*:*" both ignore every Flux image, and
+//   - "registry.k8s.io/sig-storage/csi-provisioner:v6*" only ignores proposed v6 updates.
 func (s *Scanner) shouldIgnoreContainer(container ContainerOutput) bool {
+	candidates := []string{container.Name}
+	if container.LatestTag != "" {
+		candidates = append(candidates, container.Name+":"+container.LatestTag)
+	}
 	for _, pattern := range s.config.IgnoreImages {
-		if matchGlob(pattern, container.Name) {
-			return true
+		for _, c := range candidates {
+			if matchGlob(pattern, c) {
+				return true
+			}
 		}
 	}
 	return false
 }
 
-// matchGlob performs simple glob matching with * wildcards.
+// matchGlob matches an image reference against a glob pattern where "*" matches any
+// sequence of characters (including "/" and ":").
+//
+// Registry prefixes are optional:
+//   - "*/name" also matches a bare "name" (e.g. "*/busybox" matches "busybox")
+//   - a pattern not starting with "*" also matches after any "/" in s, so
+//     "grafana/rollout-operator:*" matches "docker.io/grafana/rollout-operator:v0.28.0"
 func matchGlob(pattern, s string) bool {
-	if pattern == "*" {
+	if wildcardMatch(pattern, s) {
 		return true
 	}
-	if pattern == s {
+	if strings.HasPrefix(pattern, "*/") && wildcardMatch(pattern[2:], s) {
 		return true
 	}
-	// Handle trailing * (prefix match)
-	if len(pattern) > 1 && pattern[len(pattern)-1] == '*' {
-		prefix := pattern[:len(pattern)-1]
-		if len(s) >= len(prefix) && s[:len(prefix)] == prefix {
-			return true
-		}
-	}
-	// Handle */ prefix pattern — match against every suffix after a /
-	if len(pattern) > 2 && pattern[0] == '*' && pattern[1] == '/' {
-		rest := pattern[2:]
-		// Also try matching directly (bare image name with no / at all)
-		if matchGlob(rest, s) {
-			return true
-		}
+	if pattern != "" && pattern[0] != '*' {
 		for i := 0; i < len(s); i++ {
-			if s[i] == '/' && matchGlob(rest, s[i+1:]) {
-				return true
-			}
-		}
-	}
-	// For non-*/ patterns, also try matching against suffixes after /
-	// This handles "grafana/rollout-operator:*" vs "docker.io/grafana/rollout-operator:v0.28.0"
-	if len(pattern) > 0 && pattern[0] != '*' {
-		for i := 0; i < len(s); i++ {
-			if s[i] == '/' && matchGlob(pattern, s[i+1:]) {
+			if s[i] == '/' && wildcardMatch(pattern, s[i+1:]) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// wildcardMatch reports whether s matches pattern in full, where "*" matches any
+// (possibly empty) sequence of characters. All other characters match literally.
+func wildcardMatch(pattern, s string) bool {
+	p, i := 0, 0
+	star, mark := -1, 0
+	for i < len(s) {
+		switch {
+		case p < len(pattern) && pattern[p] == '*':
+			star, mark = p, i
+			p++
+		case p < len(pattern) && pattern[p] == s[i]:
+			p++
+			i++
+		case star >= 0:
+			p = star + 1
+			mark++
+			i = mark
+		default:
+			return false
+		}
+	}
+	for p < len(pattern) && pattern[p] == '*' {
+		p++
+	}
+	return p == len(pattern)
 }
 
 // expandTilde expands ~ to the user's home directory.

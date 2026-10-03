@@ -51,10 +51,11 @@ ignoreReleases: []
 ignoreCharts: []
 #  - kube-prometheus-stack
 
-# Container images to ignore (supports glob patterns)
+# Container images to ignore. Matched against "<name>" and "<name>:<proposed tag>";
+# "*" matches anything (see README "Ignoring images").
 ignoreImages:
-  - "*/pause:*"
-  - "*/coredns:*"
+  - "*/pause"
+  - "*/coredns"
 
 # =============================================================================
 # Version Filtering
