@@ -14,6 +14,8 @@ type Metrics struct {
 	OutdatedHelmChartsTotal  prometheus.Gauge
 	OutdatedContainersTotal  prometheus.Gauge
 	ScanLastSuccessTimestamp prometheus.Gauge
+	UnresolvedHelmReleases   prometheus.Gauge
+	ErroredContainerImages   prometheus.Gauge
 
 	// Info metrics (GaugeVec set to 1)
 	HelmChartVersionInfo *prometheus.GaugeVec
@@ -24,6 +26,7 @@ type Metrics struct {
 
 	// Counters
 	IssuesCreatedTotal *prometheus.CounterVec
+	IssuesClosedTotal  *prometheus.CounterVec
 	ScanErrorsTotal    prometheus.Counter
 
 	registry *prometheus.Registry
@@ -47,6 +50,14 @@ func NewMetrics(pushgatewayURL, jobName string) *Metrics {
 		ScanLastSuccessTimestamp: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "nova_scan_last_success_timestamp",
 			Help: "Unix timestamp of the last successful scan",
+		}),
+		UnresolvedHelmReleases: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "nova_unresolved_helm_releases",
+			Help: "Number of Helm releases whose latest chart version could not be determined",
+		}),
+		ErroredContainerImages: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "nova_errored_container_images",
+			Help: "Number of container images that could not be checked (registry error, timeout)",
 		}),
 		HelmChartVersionInfo: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
@@ -77,6 +88,13 @@ func NewMetrics(pushgatewayURL, jobName string) *Metrics {
 			},
 			[]string{"type"},
 		),
+		IssuesClosedTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "nova_issues_closed_total",
+				Help: "Total number of GitHub issues closed because the component is no longer outdated",
+			},
+			[]string{"type"},
+		),
 		ScanErrorsTotal: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "nova_scan_errors_total",
 			Help: "Total number of scan errors",
@@ -91,10 +109,13 @@ func NewMetrics(pushgatewayURL, jobName string) *Metrics {
 		m.OutdatedHelmChartsTotal,
 		m.OutdatedContainersTotal,
 		m.ScanLastSuccessTimestamp,
+		m.UnresolvedHelmReleases,
+		m.ErroredContainerImages,
 		m.HelmChartVersionInfo,
 		m.ContainerVersionInfo,
 		m.ScanDurationSeconds,
 		m.IssuesCreatedTotal,
+		m.IssuesClosedTotal,
 		m.ScanErrorsTotal,
 	)
 
@@ -132,6 +153,21 @@ func (m *Metrics) RecordContainerInfo(image, currentTag, latestTag string) {
 // RecordIssueCreated increments the issues created counter.
 func (m *Metrics) RecordIssueCreated(issueType string) {
 	m.IssuesCreatedTotal.WithLabelValues(issueType).Inc()
+}
+
+// RecordIssuesClosed adds to the closed issues counter.
+func (m *Metrics) RecordIssuesClosed(issueType string, n int) {
+	m.IssuesClosedTotal.WithLabelValues(issueType).Add(float64(n))
+}
+
+// RecordUnresolvedHelm records how many Helm releases could not be checked.
+func (m *Metrics) RecordUnresolvedHelm(n int) {
+	m.UnresolvedHelmReleases.Set(float64(n))
+}
+
+// RecordErroredImages records how many container images could not be checked.
+func (m *Metrics) RecordErroredImages(n int) {
+	m.ErroredContainerImages.Set(float64(n))
 }
 
 // RecordError increments the error counter.

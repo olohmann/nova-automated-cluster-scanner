@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/Masterminds/semver/v3"
 	"github.com/olohmann/nova-automated-cluster-scanner/pkg/config"
 	"github.com/olohmann/nova-automated-cluster-scanner/pkg/logging"
 )
@@ -99,34 +98,6 @@ func TestMatchGlob(t *testing.T) {
 			got := matchGlob(tt.pattern, tt.input)
 			if got != tt.want {
 				t.Errorf("matchGlob(%q, %q) = %v, want %v", tt.pattern, tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestCalculateSeverity(t *testing.T) {
-	tests := []struct {
-		name    string
-		current string
-		latest  string
-		want    int
-	}{
-		{"major version bump", "1.0.0", "2.0.0", 3},
-		{"minor version bump", "1.0.0", "1.1.0", 2},
-		{"patch version bump", "1.0.0", "1.0.1", 1},
-		{"no change", "1.0.0", "1.0.0", 0},
-		{"major jump multiple", "1.5.3", "3.0.0", 3},
-		{"minor with patch", "1.0.0", "1.2.3", 2},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			current, _ := semver.NewVersion(tt.current)
-			latest, _ := semver.NewVersion(tt.latest)
-
-			got := calculateSeverity(current, latest)
-			if got != tt.want {
-				t.Errorf("calculateSeverity(%s, %s) = %d, want %d", tt.current, tt.latest, got, tt.want)
 			}
 		})
 	}
@@ -319,78 +290,24 @@ func TestHelmScanResult_OutdatedNamespaces(t *testing.T) {
 	}
 }
 
-func TestScanner_ShouldSkipContainerForHelm(t *testing.T) {
-	cfg := &config.Config{}
-	logger := logging.NewLogger("error")
-	scanner := &Scanner{config: cfg, logger: logger}
-
+func TestShouldSkipContainerForHelm(t *testing.T) {
+	owners := []HelmRef{{Release: "grafana", Namespace: "lgtm"}}
 	tests := []struct {
-		name           string
-		container      ContainerOutput
-		skipNamespaces map[string]bool
-		want           bool
+		name     string
+		owners   []HelmRef
+		allOwned bool
+		skip     map[string]bool
+		want     bool
 	}{
-		{
-			name: "skip when all workloads in outdated namespace",
-			container: ContainerOutput{
-				Name: "nginx",
-				AffectedWorkloads: []WorkloadOutput{
-					{Name: "web", Namespace: "cert-manager"},
-					{Name: "api", Namespace: "cert-manager"},
-				},
-			},
-			skipNamespaces: map[string]bool{"cert-manager": true},
-			want:           true,
-		},
-		{
-			name: "don't skip when some workloads in non-outdated namespace",
-			container: ContainerOutput{
-				Name: "nginx",
-				AffectedWorkloads: []WorkloadOutput{
-					{Name: "web", Namespace: "cert-manager"},
-					{Name: "api", Namespace: "default"},
-				},
-			},
-			skipNamespaces: map[string]bool{"cert-manager": true},
-			want:           false,
-		},
-		{
-			name: "don't skip when no workloads",
-			container: ContainerOutput{
-				Name:              "nginx",
-				AffectedWorkloads: []WorkloadOutput{},
-			},
-			skipNamespaces: map[string]bool{"cert-manager": true},
-			want:           false,
-		},
-		{
-			name: "don't skip when skipNamespaces is empty",
-			container: ContainerOutput{
-				Name: "nginx",
-				AffectedWorkloads: []WorkloadOutput{
-					{Name: "web", Namespace: "cert-manager"},
-				},
-			},
-			skipNamespaces: map[string]bool{},
-			want:           false,
-		},
-		{
-			name: "don't skip when skipNamespaces is nil",
-			container: ContainerOutput{
-				Name: "nginx",
-				AffectedWorkloads: []WorkloadOutput{
-					{Name: "web", Namespace: "cert-manager"},
-				},
-			},
-			skipNamespaces: nil,
-			want:           false,
-		},
+		{"skip when every workload is owned by an outdated release", owners, true, map[string]bool{"lgtm/grafana": true}, true},
+		{"keep when the owning release is current", owners, true, map[string]bool{"lgtm/other": true}, false},
+		{"keep when some workload is not helm managed", owners, false, map[string]bool{"lgtm/grafana": true}, false},
+		{"keep without owners", nil, false, map[string]bool{"lgtm/grafana": true}, false},
+		{"keep without outdated releases", owners, true, nil, false},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := scanner.shouldSkipContainerForHelm(tt.container, tt.skipNamespaces)
-			if got != tt.want {
+			if got := shouldSkipContainerForHelm(tt.owners, tt.allOwned, tt.skip); got != tt.want {
 				t.Errorf("shouldSkipContainerForHelm() = %v, want %v", got, tt.want)
 			}
 		})

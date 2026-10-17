@@ -9,7 +9,9 @@ import (
 	"strings"
 
 	"github.com/olohmann/nova-automated-cluster-scanner/pkg/config"
+	"github.com/olohmann/nova-automated-cluster-scanner/pkg/flux"
 	"github.com/olohmann/nova-automated-cluster-scanner/pkg/github"
+	"github.com/olohmann/nova-automated-cluster-scanner/pkg/kube"
 	"github.com/olohmann/nova-automated-cluster-scanner/pkg/logging"
 	"github.com/olohmann/nova-automated-cluster-scanner/pkg/metrics"
 	"github.com/olohmann/nova-automated-cluster-scanner/pkg/nova"
@@ -56,6 +58,8 @@ func main() {
 		os.Exit(1)
 	}
 
+	setupResolvers(cfg, scanner, logger)
+
 	ctx := context.Background()
 	var hadError bool
 
@@ -77,8 +81,8 @@ func main() {
 		logger,
 	)
 
-	// Track namespaces with outdated Helm releases for container deduplication
-	var outdatedHelmNamespaces map[string]bool
+	// Outdated Helm releases, used to skip containers that the chart update will refresh
+	var outdatedHelmReleases map[string]bool
 
 	// Scan Helm charts
 	if cfg.ScanHelm {
@@ -88,9 +92,8 @@ func main() {
 			hadError = true
 		} else {
 			m.RecordHelmScan(len(result.Outdated), result.Duration)
-
-			// Get namespaces with outdated releases for container deduplication
-			outdatedHelmNamespaces = result.OutdatedNamespaces()
+			m.RecordUnresolvedHelm(len(result.Unresolved))
+			outdatedHelmReleases = result.OutdatedReleases()
 
 			// Record version info metrics for all outdated releases
 			for _, release := range result.Outdated {
@@ -115,18 +118,31 @@ func main() {
 					m.RecordIssueCreated("helm")
 				}
 			}
+
+			// Close issues of releases that are no longer outdated. Releases that could
+			// not be checked keep their issues, and an empty scan never closes anything.
+			if cfg.AutoCloseResolved && len(result.AllReleases) > 0 {
+				active := github.ActiveKeys{}
+				for _, release := range result.Outdated {
+					active.AddHelm(release)
+				}
+				for _, release := range result.Unresolved {
+					active.AddHelm(release)
+				}
+				closeResolved(ctx, issueManager, m, logger, "helm", active)
+			}
 		}
 	}
 
 	// Scan containers
 	if cfg.ScanContainers {
-		// Pass outdated Helm namespaces to skip containers that will be updated with Helm charts
-		result, err := scanner.ScanContainers(ctx, outdatedHelmNamespaces)
+		result, err := scanner.ScanContainers(ctx, outdatedHelmReleases)
 		if err != nil {
 			m.RecordError()
 			hadError = true
 		} else {
 			m.RecordContainerScan(len(result.Outdated), result.Duration)
+			m.RecordErroredImages(len(result.Errored))
 
 			// Record version info metrics for all outdated containers
 			for _, container := range result.Outdated {
@@ -147,6 +163,18 @@ func main() {
 				} else if res.Action == github.ActionCreated {
 					m.RecordIssueCreated("container")
 				}
+			}
+
+			// Images Nova could not check keep their issues; an empty scan never closes anything.
+			if cfg.AutoCloseResolved && len(result.AllContainers) > 0 {
+				active := github.ActiveKeys{}
+				for _, container := range result.Outdated {
+					active.AddImage(container.Name)
+				}
+				for _, e := range result.Errored {
+					active.AddImage(e.Image)
+				}
+				closeResolved(ctx, issueManager, m, logger, "container", active)
 			}
 		}
 	}
@@ -186,7 +214,7 @@ func runMarkdownMode(ctx context.Context, cfg *config.Config, scanner *nova.Scan
 	sb.WriteString("---\n\n")
 
 	issueCount := 0
-	var outdatedHelmNamespaces map[string]bool
+	var outdatedHelmReleases map[string]bool
 
 	// Scan Helm charts
 	if cfg.ScanHelm {
@@ -195,8 +223,7 @@ func runMarkdownMode(ctx context.Context, cfg *config.Config, scanner *nova.Scan
 			return fmt.Errorf("helm scan failed: %w", err)
 		}
 
-		// Get namespaces with outdated releases for container deduplication
-		outdatedHelmNamespaces = result.OutdatedNamespaces()
+		outdatedHelmReleases = result.OutdatedReleases()
 
 		if len(result.Outdated) > 0 {
 			sb.WriteString(fmt.Sprintf("## Helm Charts (%d outdated)\n\n", len(result.Outdated)))
@@ -213,12 +240,18 @@ func runMarkdownMode(ctx context.Context, cfg *config.Config, scanner *nova.Scan
 		} else {
 			sb.WriteString("## Helm Charts\n\n_No outdated Helm charts found._\n\n")
 		}
+		if len(result.Unresolved) > 0 {
+			sb.WriteString(fmt.Sprintf("_%d Helm releases could not be checked:_\n\n", len(result.Unresolved)))
+			for _, r := range result.Unresolved {
+				sb.WriteString(fmt.Sprintf("- `%s/%s` (%s): %s\n", r.Namespace, r.ReleaseName, r.Installed.Version, r.UnresolvedReason))
+			}
+			sb.WriteString("\n")
+		}
 	}
 
 	// Scan containers
 	if cfg.ScanContainers {
-		// Pass outdated Helm namespaces to skip containers that will be updated with Helm charts
-		result, err := scanner.ScanContainers(ctx, outdatedHelmNamespaces)
+		result, err := scanner.ScanContainers(ctx, outdatedHelmReleases)
 		if err != nil {
 			return fmt.Errorf("container scan failed: %w", err)
 		}
@@ -239,9 +272,16 @@ func runMarkdownMode(ctx context.Context, cfg *config.Config, scanner *nova.Scan
 			sb.WriteString("## Container Images\n\n_No outdated container images found._\n\n")
 		}
 
-		// Note skipped containers
+		// Note skipped and unchecked containers
 		if len(result.Skipped) > 0 {
-			sb.WriteString(fmt.Sprintf("\n_Note: %d container images were skipped because they are in namespaces with outdated Helm releases (updating the chart will update the containers)._\n\n", len(result.Skipped)))
+			sb.WriteString(fmt.Sprintf("\n_Note: %d container images were skipped because their Helm release is outdated (updating the chart will update the containers)._\n\n", len(result.Skipped)))
+		}
+		if len(result.Errored) > 0 {
+			sb.WriteString(fmt.Sprintf("\n_%d container images could not be checked:_\n\n", len(result.Errored)))
+			for _, e := range result.Errored {
+				sb.WriteString(fmt.Sprintf("- `%s`: %s\n", e.Image, e.Err))
+			}
+			sb.WriteString("\n")
 		}
 	}
 
@@ -249,4 +289,43 @@ func runMarkdownMode(ctx context.Context, cfg *config.Config, scanner *nova.Scan
 
 	_, err := output.Write([]byte(sb.String()))
 	return err
+}
+
+// setupResolvers wires the Kubernetes-API based resolvers into the scanner. If the
+// cluster API is not reachable the scanner degrades to plain Nova behaviour.
+func setupResolvers(cfg *config.Config, scanner *nova.Scanner, logger *logging.Logger) {
+	needAPI := cfg.FluxResolver || cfg.HelmOwnerLookup
+	if !needAPI && len(cfg.ChartSources) == 0 {
+		return
+	}
+
+	var fluxResolver *flux.Resolver
+	if needAPI {
+		dyn, err := kube.NewDynamicClient(nova.KubeconfigPath(cfg.Kubeconfig), cfg.Context)
+		if err != nil {
+			logger.Warn().Err(err).Msg("Kubernetes API unavailable; Flux chart resolution and Helm ownership lookup are disabled")
+		} else {
+			if cfg.FluxResolver {
+				fluxResolver = flux.New(dyn, cfg, logger)
+			}
+			if cfg.HelmOwnerLookup {
+				scanner.SetWorkloadOwnerResolver(kube.NewOwnerResolver(dyn, logger))
+			}
+		}
+	}
+	if fluxResolver == nil && len(cfg.ChartSources) > 0 {
+		fluxResolver = flux.New(nil, cfg, logger)
+	}
+	if fluxResolver != nil {
+		scanner.SetChartResolver(fluxResolver)
+	}
+}
+
+func closeResolved(ctx context.Context, im *github.IssueManager, m *metrics.Metrics, logger *logging.Logger, kind string, active github.ActiveKeys) {
+	n, err := im.CloseResolved(ctx, kind, active)
+	if err != nil {
+		logger.Error().Err(err).Str("kind", kind).Msg("Failed to close resolved issues")
+		return
+	}
+	m.RecordIssuesClosed(kind, n)
 }

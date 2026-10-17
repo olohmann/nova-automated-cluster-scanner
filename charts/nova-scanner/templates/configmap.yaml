@@ -10,6 +10,29 @@ data:
     scanContainers: {{ .Values.config.scanContainers }}
     minSeverity: {{ .Values.config.minSeverity }}
     pollArtifactHub: {{ .Values.config.pollArtifactHub }}
+    novaTimeoutSeconds: {{ .Values.config.novaTimeoutSeconds }}
+    containerUpdateScope: {{ .Values.config.containerUpdateScope }}
+    fluxResolver: {{ .Values.config.fluxResolver }}
+    helmOwnerLookup: {{ .Values.config.helmOwnerLookup }}
+    autoCloseResolved: {{ .Values.config.autoCloseResolved }}
+    ignoreWorkloadKinds:
+      {{- toYaml .Values.config.ignoreWorkloadKinds | nindent 6 }}
+    {{- if .Values.config.namespaces }}
+    namespaces:
+      {{- toYaml .Values.config.namespaces | nindent 6 }}
+    {{- end }}
+    {{- if .Values.config.desiredVersions }}
+    desiredVersions:
+      {{- toYaml .Values.config.desiredVersions | nindent 6 }}
+    {{- end }}
+    {{- if .Values.config.imageUpdateScope }}
+    imageUpdateScope:
+      {{- toYaml .Values.config.imageUpdateScope | nindent 6 }}
+    {{- end }}
+    {{- if .Values.config.chartSources }}
+    chartSources:
+      {{- toYaml .Values.config.chartSources | nindent 6 }}
+    {{- end }}
     logLevel: {{ .Values.config.logLevel }}
     {{- if .Values.config.ignoreReleases }}
     ignoreReleases:

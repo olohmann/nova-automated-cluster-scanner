@@ -131,6 +131,15 @@ func (l *Logger) IssueSuperseded(number, supersededBy int) {
 		Msg("GitHub issue closed as superseded")
 }
 
+// IssueResolved logs when an issue is closed because its component is no longer outdated.
+func (l *Logger) IssueResolved(number int, title string) {
+	l.Info().
+		Str("event", "issue_resolved").
+		Int("issue", number).
+		Str("title", title).
+		Msg("GitHub issue closed as resolved")
+}
+
 // MetricsPushed logs when metrics are pushed to the pushgateway.
 func (l *Logger) MetricsPushed(url string) {
 	l.Info().

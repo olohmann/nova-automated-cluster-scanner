@@ -69,6 +69,31 @@ config:
   pollArtifactHub: true
   # Log level: debug, info, warn, error
   logLevel: info
+  # Namespaces to scan (empty = all namespaces)
+  namespaces: []
+  # Pin chart versions: chart name -> version (passed to nova --desired-versions)
+  desiredVersions: {}
+  # Seconds nova may spend on registry lookups of the container scan.
+  # Nova's own default (10s) silently drops slow registries.
+  novaTimeoutSeconds: 120
+  # Container update target: any (newest tag incl. new majors), minor (same major), patch (same minor)
+  containerUpdateScope: any
+  # Per-image override of containerUpdateScope: glob pattern -> scope
+  # e.g. {"*/postgres": "minor", "*/grafana": "patch"}
+  imageUpdateScope: {}
+  # Skip containers whose workloads are all of these kinds
+  # (Node = static control-plane pods that GitOps cannot update)
+  ignoreWorkloadKinds:
+    - Node
+  # Resolve latest chart versions from the Flux HelmRepository/OCIRepository a release is
+  # installed from instead of Nova's ArtifactHub name matching
+  fluxResolver: true
+  # Chart sources for charts Flux does not manage: chart name -> {type: helm|oci, url: ...}
+  chartSources: {}
+  # Map containers to their Helm release (meta.helm.sh annotations) to avoid duplicate issues
+  helmOwnerLookup: true
+  # Close open issues whose component is no longer outdated
+  autoCloseResolved: true
   # Helm releases to ignore
   ignoreReleases: []
   # Chart names to ignore
@@ -107,6 +132,11 @@ github:
   repo: ""
   # Dry-run mode (don't create actual issues)
   dryRun: false
+
+# Registry credentials for private images/charts (e.g. private ghcr.io packages).
+# Secret of type kubernetes.io/dockerconfigjson, mounted as $DOCKER_CONFIG/config.json
+registryAuth:
+  existingSecret: ""
 
 # Use existing secret for sensitive values
 # Secret should contain: GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO

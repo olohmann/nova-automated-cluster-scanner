@@ -21,6 +21,7 @@ import (
 type fakeIssue struct {
 	Number      int    `json:"number"`
 	Title       string `json:"title"`
+	Body        string `json:"body"`
 	State       string `json:"state"`
 	StateReason string `json:"state_reason,omitempty"`
 	HTMLURL     string `json:"html_url"`
@@ -75,11 +76,11 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(`{"message":"You have exceeded a secondary rate limit","documentation_url":"https://docs.github.com/rest/overview/rate-limits-for-the-rest-api#about-secondary-rate-limits"}`))
 			return
 		}
-		var req struct{ Title string }
+		var req struct{ Title, Body string }
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		f.next++
 		f.creates++
-		is := &fakeIssue{Number: f.next, Title: req.Title, State: "open", HTMLURL: fmt.Sprintf("https://github.com/o/r/issues/%d", f.next)}
+		is := &fakeIssue{Number: f.next, Title: req.Title, Body: req.Body, State: "open", HTMLURL: fmt.Sprintf("https://github.com/o/r/issues/%d", f.next)}
 		f.issues = append(f.issues, is)
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(is)
@@ -94,8 +95,14 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				if t, ok := req["title"].(string); ok {
 					is.Title = t
 				}
+				if b, ok := req["body"].(string); ok {
+					is.Body = b
+				}
 				if s, ok := req["state"].(string); ok {
 					is.State = s
+				}
+				if r, ok := req["state_reason"].(string); ok {
+					is.StateReason = r
 				}
 				_ = json.NewEncoder(w).Encode(is)
 				return
@@ -342,5 +349,114 @@ func TestEnsureIssue_GivesUpAfterMaxRetries(t *testing.T) {
 	}
 	if f.creates != 0 {
 		t.Fatalf("creates = %d, want 0", f.creates)
+	}
+}
+
+func helmRelease(name, ns, current, latest string) nova.ReleaseOutput {
+	return nova.ReleaseOutput{
+		ReleaseName: name, ChartName: name, Namespace: ns,
+		Installed: nova.VersionInfo{Version: current}, Latest: nova.VersionInfo{Version: latest},
+	}
+}
+
+func TestEnsureIssue_WritesMarkerAndSeparatesNamespaces(t *testing.T) {
+	f := newFakeGitHub()
+	im := newTestManager(t, f, false)
+
+	for _, ns := range []string{"team-a", "team-b"} {
+		res, err := im.CreateHelmIssue(context.Background(), helmRelease("nginx", ns, "1.0.0", "1.1.0"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Action != ActionCreated {
+			t.Fatalf("%s: got %+v, want created (same release name in another namespace is a different component)", ns, res)
+		}
+	}
+	if f.creates != 2 {
+		t.Fatalf("expected 2 issues, got %d", f.creates)
+	}
+	if !strings.Contains(f.issues[0].Body, "<!-- nova-scanner:key=helm|team-a/nginx -->") {
+		t.Errorf("body lacks marker: %q", f.issues[0].Body)
+	}
+}
+
+func TestEnsureIssue_MigratesLegacyIssueWithoutMarker(t *testing.T) {
+	f := newFakeGitHub(&fakeIssue{Number: 8, Title: "[Nova] Update Helm chart: kutt (9.6.13 → 9.10.0)", State: "open"})
+	im := newTestManager(t, f, false)
+
+	res, err := im.CreateHelmIssue(context.Background(), helmRelease("kutt", "kutt", "9.6.13", "9.11.2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Action != ActionUpdated || f.creates != 0 {
+		t.Fatalf("got %+v with %d creates, want legacy issue updated in place", res, f.creates)
+	}
+	if !strings.Contains(f.issues[0].Body, "nova-scanner:key=helm|kutt/kutt") {
+		t.Errorf("updated issue should now carry a marker, body=%q", f.issues[0].Body)
+	}
+}
+
+func TestEnsureIssue_SameImageWithTwoRunsDoesNotFlap(t *testing.T) {
+	f := newFakeGitHub()
+	im := newTestManager(t, f, false)
+	c := container("postgres", "15.2", "16.4")
+
+	if _, err := im.CreateContainerIssue(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	// second run with a fresh manager (new process) sees the issue by marker and skips
+	im2 := newTestManager(t, f, false)
+	res, err := im2.CreateContainerIssue(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Action != ActionSkipped || len(f.edits) != 0 {
+		t.Fatalf("got %+v edits=%v, want skipped without edits", res, f.edits)
+	}
+}
+
+func TestCloseResolved(t *testing.T) {
+	f := newFakeGitHub(
+		&fakeIssue{Number: 1, Title: "[Nova] Update Helm chart: gone (1.0.0 → 1.1.0)", State: "open", Body: "x\n<!-- nova-scanner:key=helm|ns/gone -->"},
+		&fakeIssue{Number: 2, Title: "[Nova] Update Helm chart: still (1.0.0 → 1.1.0)", State: "open", Body: "x\n<!-- nova-scanner:key=helm|ns/still -->"},
+		&fakeIssue{Number: 3, Title: "[Nova] Update Helm chart: legacy (1.0.0 → 1.1.0)", State: "open"},
+		&fakeIssue{Number: 4, Title: "[Nova] Update container image: img (1 → 2)", State: "open"},
+		&fakeIssue{Number: 5, Title: "[Nova] Update Helm chart: unknown (1.0.0 → 1.1.0)", State: "open", Body: "<!-- nova-scanner:key=helm|ns/unknown -->"},
+		&fakeIssue{Number: 6, Title: "hand written issue", State: "open"},
+	)
+	im := newTestManager(t, f, false)
+
+	active := ActiveKeys{}
+	active.AddHelm(helmRelease("still", "ns", "1.0.0", "1.1.0"))
+	active.AddHelm(helmRelease("unknown", "ns", "", ""))
+
+	n, err := im.CloseResolved(context.Background(), kindHelm, active)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("closed %d issues, want 2 (#1 and #3)", n)
+	}
+	for _, num := range []int{1, 3} {
+		if len(f.edits[num]) != 1 || f.edits[num][0]["state"] != "closed" || f.edits[num][0]["state_reason"] != "completed" {
+			t.Errorf("issue #%d edits = %v, want closed completed", num, f.edits[num])
+		}
+	}
+	for _, num := range []int{2, 4, 5, 6} {
+		if len(f.edits[num]) != 0 {
+			t.Errorf("issue #%d must stay open, edits = %v", num, f.edits[num])
+		}
+	}
+}
+
+func TestCloseResolved_DryRunDoesNotWrite(t *testing.T) {
+	f := newFakeGitHub(&fakeIssue{Number: 1, Title: "[Nova] Update container image: img (1 → 2)", State: "open"})
+	im := newTestManager(t, f, true)
+
+	if _, err := im.CloseResolved(context.Background(), kindContainer, ActiveKeys{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.edits) != 0 || len(f.comments) != 0 {
+		t.Fatalf("dry run wrote to GitHub: edits=%v comments=%v", f.edits, f.comments)
 	}
 }

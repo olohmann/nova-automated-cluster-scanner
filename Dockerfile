@@ -15,14 +15,16 @@ COPY . .
 
 # Build the binary
 ARG VERSION=dev
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+ARG TARGETARCH=amd64
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
     -ldflags="-s -w -X main.version=${VERSION}" \
     -o /nova-scanner \
     ./cmd/scanner
 
 # Download Nova CLI
-ARG NOVA_VERSION=3.11.10
-RUN wget -qO- "https://github.com/FairwindsOps/nova/releases/download/v${NOVA_VERSION}/nova_${NOVA_VERSION}_linux_amd64.tar.gz" | tar xz -C /usr/local/bin nova
+# >= 3.12.2 is required: earlier versions propose bare tags for variant tags (e.g. 1.2.3-alpine -> 1.2.4)
+ARG NOVA_VERSION=3.12.2
+RUN wget -qO- "https://github.com/FairwindsOps/nova/releases/download/v${NOVA_VERSION}/nova_${NOVA_VERSION}_linux_${TARGETARCH}.tar.gz" | tar xz -C /usr/local/bin nova
 
 # Runtime stage - use alpine for shell commands (Nova CLI needs it)
 FROM alpine:3.19

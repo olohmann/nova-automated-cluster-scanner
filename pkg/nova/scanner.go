@@ -1,23 +1,68 @@
 package nova
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/Masterminds/semver/v3"
 	"github.com/olohmann/nova-automated-cluster-scanner/pkg/config"
 	"github.com/olohmann/nova-automated-cluster-scanner/pkg/logging"
+	"github.com/olohmann/nova-automated-cluster-scanner/pkg/version"
+)
+
+// Chart version sources reported in ReleaseOutput.Source.
+const (
+	SourceArtifactHub = "artifacthub"
+	SourceDesired     = "desired-versions"
 )
 
 // Scanner wraps Nova CLI functionality.
 type Scanner struct {
 	config *config.Config
 	logger *logging.Logger
+
+	chartResolver ChartResolver
+	ownerResolver WorkloadOwnerResolver
+
+	// run executes the nova binary; replaced in tests.
+	run func(ctx context.Context, args []string) ([]byte, error)
+}
+
+// ChartResolution is the authoritative latest version of a chart's source.
+type ChartResolution struct {
+	// Latest is the newest stable chart version ("" if it could not be determined).
+	Latest string
+	// Source describes where Latest came from (e.g. "flux:helmrepository").
+	Source string
+	// Unresolvable explains why the source cannot be checked (e.g. a GitRepository).
+	Unresolvable string
+}
+
+// ChartResolver looks up the latest chart version for a release from its real source,
+// instead of Nova's name-based ArtifactHub guess. found is false if the resolver knows
+// nothing about the release.
+type ChartResolver interface {
+	Resolve(ctx context.Context, release ReleaseOutput) (res ChartResolution, found bool)
+}
+
+// HelmRef identifies a Helm release.
+type HelmRef struct {
+	Release   string
+	Namespace string
+}
+
+// Key returns "namespace/release".
+func (r HelmRef) Key() string { return r.Namespace + "/" + r.Release }
+
+// WorkloadOwnerResolver maps a workload to the Helm release that manages it.
+type WorkloadOwnerResolver interface {
+	HelmRelease(ctx context.Context, w WorkloadOutput) (ref HelmRef, ok bool)
 }
 
 // ReleaseOutput represents a Helm release from Nova's output.
@@ -34,6 +79,17 @@ type ReleaseOutput struct {
 	Deprecated  bool        `json:"deprecated"`
 	HelmVersion string      `json:"helmVersion"`
 	Overridden  bool        `json:"overridden"`
+
+	// Source is where Latest was determined (set by the scanner).
+	Source string `json:"-"`
+	// Unresolved is set when the latest version cannot be determined reliably.
+	Unresolved       bool   `json:"-"`
+	UnresolvedReason string `json:"-"`
+}
+
+// Key returns "namespace/release".
+func (r ReleaseOutput) Key() string {
+	return HelmRef{Release: r.ReleaseName, Namespace: r.Namespace}.Key()
 }
 
 // VersionInfo holds version details.
@@ -47,8 +103,18 @@ type ContainerOutput struct {
 	Name              string           `json:"name"`
 	CurrentTag        string           `json:"current_version"`
 	LatestTag         string           `json:"latest_version"`
+	LatestMinorTag    string           `json:"latest_minor_version"`
+	LatestPatchTag    string           `json:"latest_patch_version"`
 	IsOld             bool             `json:"outdated"`
 	AffectedWorkloads []WorkloadOutput `json:"affectedWorkloads"`
+
+	// OverallLatestTag is Nova's newest tag; LatestTag is replaced by the update target
+	// selected by the scanner (see containerUpdateScope).
+	OverallLatestTag string `json:"-"`
+	// OtherCurrentTags lists further tags of the same image running in the cluster.
+	OtherCurrentTags []string `json:"-"`
+	// HelmReleases lists the Helm releases that own the affected workloads.
+	HelmReleases []HelmRef `json:"-"`
 }
 
 // WorkloadOutput represents a Kubernetes workload.
@@ -59,17 +125,27 @@ type WorkloadOutput struct {
 	Container string `json:"container"`
 }
 
+// ErroredImage is an image Nova could not check (registry error, timeout, ...).
+type ErroredImage struct {
+	Image string `json:"Image"`
+	Err   string `json:"Err"`
+}
+
 // NovaOutput represents the full Nova JSON output.
 type NovaOutput struct {
 	HelmReleases []ReleaseOutput   `json:"helm_releases"`
+	Helm         []ReleaseOutput   `json:"helm"`
 	Containers   []ContainerOutput `json:"container_images"`
+	ErrImages    []ErroredImage    `json:"err_images"`
 }
 
 // HelmScanResult contains the results of a Helm scan.
 type HelmScanResult struct {
 	AllReleases []ReleaseOutput
 	Outdated    []ReleaseOutput
-	Duration    time.Duration
+	// Unresolved releases could not be checked (no reliable latest version).
+	Unresolved []ReleaseOutput
+	Duration   time.Duration
 }
 
 // OutdatedNamespaces returns a set of namespaces that have outdated Helm releases.
@@ -81,54 +157,45 @@ func (r *HelmScanResult) OutdatedNamespaces() map[string]bool {
 	return namespaces
 }
 
+// OutdatedReleases returns the "namespace/release" keys of the outdated releases.
+func (r *HelmScanResult) OutdatedReleases() map[string]bool {
+	keys := make(map[string]bool, len(r.Outdated))
+	for _, release := range r.Outdated {
+		keys[release.Key()] = true
+	}
+	return keys
+}
+
 // ContainerScanResult contains the results of a container scan.
 type ContainerScanResult struct {
 	AllContainers []ContainerOutput
 	Outdated      []ContainerOutput
-	Skipped       []ContainerOutput // Containers skipped due to Helm deduplication
+	Skipped       []ContainerOutput // Containers skipped because their Helm release is itself reported as outdated
+	Errored       []ErroredImage    // Images Nova could not check; their state is unknown
 	Duration      time.Duration
 }
 
 // NewScanner creates a new Scanner instance.
 func NewScanner(cfg *config.Config, logger *logging.Logger) (*Scanner, error) {
-	return &Scanner{
+	s := &Scanner{
 		config: cfg,
 		logger: logger.WithComponent("nova"),
-	}, nil
+	}
+	s.run = s.execNova
+	return s, nil
 }
 
-// ScanHelm scans for outdated Helm releases using Nova CLI.
-func (s *Scanner) ScanHelm(ctx context.Context) (*HelmScanResult, error) {
-	s.logger.ScanStart("helm")
-	start := time.Now()
+// SetChartResolver sets the resolver that overrides Nova's ArtifactHub guess for Helm releases.
+func (s *Scanner) SetChartResolver(r ChartResolver) { s.chartResolver = r }
 
-	// Build Nova command
-	args := []string{"find", "--format", "json", "--helm"}
+// SetWorkloadOwnerResolver sets the resolver used to map containers to Helm releases.
+func (s *Scanner) SetWorkloadOwnerResolver(r WorkloadOwnerResolver) { s.ownerResolver = r }
 
-	// Add ArtifactHub polling if enabled
-	if s.config.PollArtifactHub {
-		args = append(args, "--poll-artifacthub")
-	}
-
-	// Add kubeconfig if not running in-cluster
-	if kubeconfig := getKubeconfig(s.config.Kubeconfig); kubeconfig != "" {
-		args = append(args, "--kubeconfig", kubeconfig)
-	}
-
-	// Add context if specified
-	if s.config.Context != "" {
-		args = append(args, "--context", s.config.Context)
-	}
-
-	// Add include-all to get all releases, not just outdated
-	args = append(args, "--include-all")
-
+func (s *Scanner) execNova(ctx context.Context, args []string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "nova", args...)
 	s.logger.Debug().Strs("args", args).Msg("Executing nova command")
-
 	output, err := cmd.Output()
 	if err != nil {
-		// Try to get stderr for more context
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			s.logger.Error().
 				Str("stderr", string(exitErr.Stderr)).
@@ -136,353 +203,453 @@ func (s *Scanner) ScanHelm(ctx context.Context) (*HelmScanResult, error) {
 				Err(err).
 				Msg("Nova command failed")
 		}
-		s.logger.ScanError("helm", err)
 		return nil, fmt.Errorf("nova command failed: %w", err)
 	}
+	return output, nil
+}
 
-	// Parse Nova output
-	var novaOutput NovaOutput
-	if err := json.Unmarshal(output, &novaOutput); err != nil {
-		// Try parsing as array directly (older Nova versions)
-		var releases []ReleaseOutput
-		if err2 := json.Unmarshal(output, &releases); err2 != nil {
-			return nil, fmt.Errorf("failed to parse nova output: %w", err)
+// commonArgs returns the kubeconfig/context arguments shared by all nova invocations.
+func (s *Scanner) commonArgs() []string {
+	var args []string
+	if kubeconfig := getKubeconfig(s.config.Kubeconfig); kubeconfig != "" {
+		args = append(args, "--kubeconfig", kubeconfig)
+	}
+	if s.config.Context != "" {
+		args = append(args, "--context", s.config.Context)
+	}
+	return args
+}
+
+// namespaces returns the namespaces to scan; "" means cluster-wide.
+func (s *Scanner) namespaces() []string {
+	if len(s.config.Namespaces) == 0 {
+		return []string{""}
+	}
+	return s.config.Namespaces
+}
+
+// parseNovaOutput parses Nova's JSON. Nova prints a bare array for helm-only scans, an
+// object for container scans, and plain text ("No releases found") when empty.
+func parseNovaOutput(output []byte) (NovaOutput, error) {
+	var out NovaOutput
+	trimmed := bytes.TrimSpace(output)
+	if len(trimmed) == 0 || bytes.HasPrefix(trimmed, []byte("No ")) {
+		return out, nil
+	}
+	if trimmed[0] == '[' {
+		if err := json.Unmarshal(trimmed, &out.HelmReleases); err != nil {
+			return out, fmt.Errorf("failed to parse nova output: %w", err)
 		}
-		novaOutput.HelmReleases = releases
+		return out, nil
+	}
+	if err := json.Unmarshal(trimmed, &out); err != nil {
+		return out, fmt.Errorf("failed to parse nova output: %w", err)
+	}
+	out.HelmReleases = append(out.HelmReleases, out.Helm...)
+	return out, nil
+}
+
+// ScanHelm scans for outdated Helm releases using Nova CLI.
+func (s *Scanner) ScanHelm(ctx context.Context) (*HelmScanResult, error) {
+	s.logger.ScanStart("helm")
+	start := time.Now()
+
+	var releases []ReleaseOutput
+	seen := map[string]bool{}
+	for _, ns := range s.namespaces() {
+		args := []string{"find", "--format", "json", "--helm", "--include-all"}
+		if s.config.PollArtifactHub {
+			args = append(args, "--poll-artifacthub")
+		}
+		if ns != "" {
+			args = append(args, "--namespace", ns)
+		}
+		if len(s.config.DesiredVersions) > 0 {
+			args = append(args, "--desired-versions", desiredVersionsArg(s.config.DesiredVersions))
+		}
+		args = append(args, s.commonArgs()...)
+
+		output, err := s.run(ctx, args)
+		if err != nil {
+			s.logger.ScanError("helm", err)
+			return nil, err
+		}
+		parsed, err := parseNovaOutput(output)
+		if err != nil {
+			s.logger.ScanError("helm", err)
+			return nil, err
+		}
+		for _, r := range parsed.HelmReleases {
+			if seen[r.Key()] {
+				continue
+			}
+			seen[r.Key()] = true
+			releases = append(releases, r)
+		}
 	}
 
-	// Filter by ignore lists
-	var filtered []ReleaseOutput
-	for _, release := range novaOutput.HelmReleases {
+	var filtered, outdated, unresolved []ReleaseOutput
+	for _, release := range releases {
 		if s.shouldIgnoreRelease(release) {
 			continue
 		}
+		release = s.resolveRelease(ctx, release)
 		filtered = append(filtered, release)
-	}
 
-	// Filter outdated releases
-	var outdated []ReleaseOutput
-	for _, release := range filtered {
-		if release.IsOld {
-			// Check if latest version matches a blacklisted pattern (global or chart-specific)
-			if s.config.ShouldIgnoreChartVersion(release.ChartName, release.Latest.Version) {
-				s.logger.Debug().
-					Str("release", release.ReleaseName).
-					Str("chart", release.ChartName).
-					Str("latestVersion", release.Latest.Version).
-					Msg("Skipping release: latest version matches blacklist pattern")
-				continue
-			}
-
-			// Apply severity filtering
-			if s.meetsMinSeverity(release.Installed.Version, release.Latest.Version) {
-				outdated = append(outdated, release)
-				s.logger.OutdatedFound(
-					"helm",
-					release.ReleaseName,
-					release.Namespace,
-					release.Installed.Version,
-					release.Latest.Version,
-				)
-			}
+		if release.Unresolved {
+			unresolved = append(unresolved, release)
+			s.logger.Warn().
+				Str("release", release.ReleaseName).
+				Str("namespace", release.Namespace).
+				Str("chart", release.ChartName).
+				Str("installed", release.Installed.Version).
+				Str("reason", release.UnresolvedReason).
+				Msg("Cannot determine latest chart version; release is not checked")
+			continue
 		}
+		if !release.IsOld {
+			continue
+		}
+		if s.config.ShouldIgnoreChartVersion(release.ChartName, release.Latest.Version) {
+			s.logger.Debug().
+				Str("release", release.ReleaseName).
+				Str("chart", release.ChartName).
+				Str("latestVersion", release.Latest.Version).
+				Msg("Skipping release: latest version matches blacklist pattern")
+			continue
+		}
+		if !s.meetsMinSeverity(release.Installed.Version, release.Latest.Version) {
+			continue
+		}
+		outdated = append(outdated, release)
+		s.logger.OutdatedFound("helm", release.ReleaseName, release.Namespace, release.Installed.Version, release.Latest.Version)
 	}
 
 	duration := time.Since(start)
 	s.logger.ScanEnd("helm", duration, len(filtered), len(outdated))
+	if len(unresolved) > 0 {
+		s.logger.Warn().Int("unresolved", len(unresolved)).Msg("Some Helm releases could not be checked")
+	}
 
 	return &HelmScanResult{
 		AllReleases: filtered,
 		Outdated:    outdated,
+		Unresolved:  unresolved,
 		Duration:    duration,
 	}, nil
 }
 
+func desiredVersionsArg(m map[string]string) string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+"="+m[k])
+	}
+	return strings.Join(parts, ",")
+}
+
+// resolveRelease replaces Nova's ArtifactHub-based latest version with the one from the
+// release's real chart source when it is known, and re-validates IsOld.
+func (s *Scanner) resolveRelease(ctx context.Context, r ReleaseOutput) ReleaseOutput {
+	switch {
+	case r.Overridden:
+		r.Source = SourceDesired
+	default:
+		var res ChartResolution
+		var found bool
+		if s.chartResolver != nil {
+			res, found = s.chartResolver.Resolve(ctx, r)
+		}
+		switch {
+		case found && res.Unresolvable != "":
+			r.Unresolved = true
+			r.UnresolvedReason = res.Unresolvable
+			r.Source = res.Source
+			r.IsOld = false
+			return r
+		case found && res.Latest == "":
+			r.Unresolved = true
+			r.UnresolvedReason = "no stable chart version found in " + res.Source
+			r.Source = res.Source
+			r.IsOld = false
+			return r
+		case found:
+			r.Latest = VersionInfo{Version: res.Latest}
+			r.Source = res.Source
+		case r.Latest.Version != "":
+			r.Source = SourceArtifactHub
+		default:
+			r.Unresolved = true
+			r.UnresolvedReason = "no matching chart found on ArtifactHub and the release is not managed by a known Flux source"
+			r.IsOld = false
+			return r
+		}
+	}
+	// Re-derive IsOld: Nova's comparison cannot see build metadata/suffix ordering and
+	// the resolver may have replaced the version altogether.
+	r.IsOld = version.IsNewer(r.Installed.Version, r.Latest.Version)
+	return r
+}
+
 // ScanContainers scans for outdated container images using Nova CLI.
-// skipNamespaces contains namespaces with outdated Helm releases - containers in these
-// namespaces will be skipped to avoid duplicate issues (updating the Helm chart will update the containers).
-func (s *Scanner) ScanContainers(ctx context.Context, skipNamespaces map[string]bool) (*ContainerScanResult, error) {
+//
+// skipReleases contains the "namespace/release" keys of Helm releases that are reported
+// as outdated themselves; containers owned only by such releases are skipped because
+// updating the chart updates them.
+func (s *Scanner) ScanContainers(ctx context.Context, skipReleases map[string]bool) (*ContainerScanResult, error) {
 	s.logger.ScanStart("container")
 	start := time.Now()
 
-	// Build Nova command for container scanning
-	args := []string{"find", "--format", "json", "--containers"}
-
-	// Add kubeconfig if not running in-cluster
-	if kubeconfig := getKubeconfig(s.config.Kubeconfig); kubeconfig != "" {
-		args = append(args, "--kubeconfig", kubeconfig)
-	}
-
-	// Add context if specified
-	if s.config.Context != "" {
-		args = append(args, "--context", s.config.Context)
-	}
-
-	cmd := exec.CommandContext(ctx, "nova", args...)
-
-	output, err := cmd.Output()
-	if err != nil {
-		// Try to get stderr for more context
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			s.logger.Error().
-				Str("stderr", string(exitErr.Stderr)).
-				Err(err).
-				Msg("Nova command failed")
+	var all []ContainerOutput
+	var errored []ErroredImage
+	for _, ns := range s.namespaces() {
+		args := []string{
+			"find", "--format", "json", "--containers",
+			"--show-errored-containers",
+			"--timeout", strconv.Itoa(s.config.NovaTimeoutSeconds),
 		}
-		s.logger.ScanError("container", err)
-		return nil, fmt.Errorf("nova command failed: %w", err)
+		if ns != "" {
+			args = append(args, "--namespace", ns)
+		}
+		args = append(args, s.commonArgs()...)
+
+		output, err := s.run(ctx, args)
+		if err != nil {
+			s.logger.ScanError("container", err)
+			return nil, err
+		}
+		parsed, err := parseNovaOutput(output)
+		if err != nil {
+			s.logger.ScanError("container", err)
+			return nil, err
+		}
+		all = append(all, parsed.Containers...)
+		errored = append(errored, parsed.ErrImages...)
 	}
 
-	// Parse Nova output
-	var novaOutput NovaOutput
-	if err := json.Unmarshal(output, &novaOutput); err != nil {
-		return nil, fmt.Errorf("failed to parse nova output: %w", err)
+	for _, e := range errored {
+		s.logger.Warn().Str("image", e.Image).Str("error", e.Err).Msg("Nova could not check image; its update state is unknown")
 	}
 
-	// Filter by ignore lists
 	var filtered []ContainerOutput
-	for _, container := range novaOutput.Containers {
-		if s.shouldIgnoreContainer(container) {
+	for _, container := range mergeContainers(all) {
+		container, keep := s.filterWorkloadKinds(container)
+		if !keep || s.shouldIgnoreContainer(container) {
 			continue
 		}
 		filtered = append(filtered, container)
 	}
 
-	// Filter outdated containers, skipping those in namespaces with outdated Helm releases
-	var outdated []ContainerOutput
-	var skipped []ContainerOutput
+	var candidates []ContainerOutput
 	for _, container := range filtered {
-		if container.IsOld {
-			// Check if latest version matches a blacklisted pattern
-			if s.config.ShouldIgnoreVersion(container.LatestTag) {
-				s.logger.Debug().
-					Str("image", container.Name).
-					Str("latestTag", container.LatestTag).
-					Msg("Skipping container: latest version matches blacklist pattern")
-				continue
-			}
-
-			// Check if all affected workloads are in namespaces with outdated Helm releases
-			if s.shouldSkipContainerForHelm(container, skipNamespaces) {
-				skipped = append(skipped, container)
-				s.logger.Debug().
-					Str("image", container.Name).
-					Str("reason", "namespace has outdated Helm release").
-					Msg("Skipping container (will be updated with Helm chart)")
-				continue
-			}
-
-			outdated = append(outdated, container)
-			s.logger.OutdatedFound(
-				"container",
-				container.Name,
-				"",
-				container.CurrentTag,
-				container.LatestTag,
-			)
+		if !container.IsOld {
+			continue
 		}
+		container.OverallLatestTag = container.LatestTag
+		target := s.containerTarget(container)
+		if target == "" {
+			s.logger.Debug().
+				Str("image", container.Name).
+				Str("current", container.CurrentTag).
+				Str("latest", container.LatestTag).
+				Msg("Skipping container: no newer, allowed tag in the configured update scope")
+			continue
+		}
+		container.LatestTag = target
+		if !s.meetsMinSeverity(container.CurrentTag, target) {
+			continue
+		}
+		candidates = append(candidates, container)
+	}
+
+	var outdated, skipped []ContainerOutput
+	for _, container := range groupByImage(candidates) {
+		var allOwned bool
+		container.HelmReleases, allOwned = s.helmOwners(ctx, container)
+		if shouldSkipContainerForHelm(container.HelmReleases, allOwned, skipReleases) {
+			skipped = append(skipped, container)
+			s.logger.Debug().
+				Str("image", container.Name).
+				Str("reason", "owning Helm release is reported as outdated").
+				Msg("Skipping container (will be updated with Helm chart)")
+			continue
+		}
+		outdated = append(outdated, container)
+		s.logger.OutdatedFound("container", container.Name, "", container.CurrentTag, container.LatestTag)
 	}
 
 	duration := time.Since(start)
 	s.logger.ScanEnd("container", duration, len(filtered), len(outdated))
-
 	if len(skipped) > 0 {
-		s.logger.Info().
-			Int("skipped", len(skipped)).
-			Msg("Skipped containers in namespaces with outdated Helm releases")
+		s.logger.Info().Int("skipped", len(skipped)).Msg("Skipped containers owned by outdated Helm releases")
+	}
+	if len(errored) > 0 {
+		s.logger.Warn().Int("errored", len(errored)).Msg("Some container images could not be checked")
 	}
 
 	return &ContainerScanResult{
 		AllContainers: filtered,
 		Outdated:      outdated,
 		Skipped:       skipped,
+		Errored:       errored,
 		Duration:      duration,
 	}, nil
 }
 
-// shouldSkipContainerForHelm returns true if all workloads for this container
-// are in namespaces that have outdated Helm releases.
-func (s *Scanner) shouldSkipContainerForHelm(container ContainerOutput, skipNamespaces map[string]bool) bool {
-	if len(skipNamespaces) == 0 {
-		return false
+// mergeContainers combines entries with identical image and current tag (possible when
+// several namespaces are scanned separately).
+func mergeContainers(in []ContainerOutput) []ContainerOutput {
+	index := map[string]int{}
+	var out []ContainerOutput
+	for _, c := range in {
+		key := c.Name + "\x00" + c.CurrentTag
+		if i, ok := index[key]; ok {
+			out[i].AffectedWorkloads = append(out[i].AffectedWorkloads, c.AffectedWorkloads...)
+			continue
+		}
+		index[key] = len(out)
+		out = append(out, c)
 	}
-	if len(container.AffectedWorkloads) == 0 {
-		return false
-	}
+	return out
+}
 
-	// Skip if ALL affected workloads are in namespaces with outdated Helm releases
-	for _, workload := range container.AffectedWorkloads {
-		if !skipNamespaces[workload.Namespace] {
-			// At least one workload is in a namespace without outdated Helm release
+// groupByImage collapses entries of the same image running with different tags into one
+// entry (the oldest tag), so a single issue tracks the image instead of flapping between
+// the variants.
+func groupByImage(in []ContainerOutput) []ContainerOutput {
+	index := map[string]int{}
+	var out []ContainerOutput
+	for _, c := range in {
+		i, ok := index[c.Name]
+		if !ok {
+			index[c.Name] = len(out)
+			out = append(out, c)
+			continue
+		}
+		keep := out[i]
+		if version.IsNewer(c.CurrentTag, keep.CurrentTag) { // c is older
+			c.AffectedWorkloads = append(c.AffectedWorkloads, keep.AffectedWorkloads...)
+			c.OtherCurrentTags = append(append(c.OtherCurrentTags, keep.OtherCurrentTags...), keep.CurrentTag)
+			out[i] = c
+		} else {
+			keep.AffectedWorkloads = append(keep.AffectedWorkloads, c.AffectedWorkloads...)
+			keep.OtherCurrentTags = append(append(keep.OtherCurrentTags, c.OtherCurrentTags...), c.CurrentTag)
+			out[i] = keep
+		}
+	}
+	return out
+}
+
+// filterWorkloadKinds drops workloads of ignored kinds (e.g. static control-plane pods
+// owned by a Node). keep is false if nothing is left.
+func (s *Scanner) filterWorkloadKinds(c ContainerOutput) (ContainerOutput, bool) {
+	if len(s.config.IgnoreWorkloadKinds) == 0 || len(c.AffectedWorkloads) == 0 {
+		return c, true
+	}
+	var kept []WorkloadOutput
+	for _, w := range c.AffectedWorkloads {
+		if !s.config.ShouldIgnoreWorkloadKind(w.Kind) {
+			kept = append(kept, w)
+		}
+	}
+	if len(kept) == 0 {
+		return c, false
+	}
+	c.AffectedWorkloads = kept
+	return c, true
+}
+
+// scopeFor returns the update scope for an image ("any", "minor" or "patch").
+func (s *Scanner) scopeFor(image string) string {
+	patterns := make([]string, 0, len(s.config.ImageUpdateScope))
+	for p := range s.config.ImageUpdateScope {
+		patterns = append(patterns, p)
+	}
+	sort.Strings(patterns)
+	for _, p := range patterns {
+		if matchGlob(p, image) {
+			return s.config.ImageUpdateScope[p]
+		}
+	}
+	return s.config.ContainerUpdateScope
+}
+
+// containerTarget selects the tag to propose for an outdated container, honouring the
+// update scope and the version blacklist. If Nova's newest tag is unusable (blacklisted,
+// or not actually newer) the next best candidate within the scope is used. It returns ""
+// if there is nothing to propose.
+func (s *Scanner) containerTarget(c ContainerOutput) string {
+	var candidates []string
+	switch s.scopeFor(c.Name) {
+	case "patch":
+		candidates = []string{c.LatestPatchTag}
+	case "minor":
+		candidates = []string{c.LatestMinorTag, c.LatestPatchTag}
+	default:
+		candidates = []string{c.LatestTag, c.LatestMinorTag, c.LatestPatchTag}
+	}
+	for _, cand := range candidates {
+		if cand == "" || cand == c.CurrentTag {
+			continue
+		}
+		if s.config.ShouldIgnoreVersion(cand) {
+			continue
+		}
+		if !version.IsNewer(c.CurrentTag, cand) || !version.SameVariant(c.CurrentTag, cand) {
+			continue
+		}
+		return cand
+	}
+	return ""
+}
+
+// helmOwners resolves the Helm releases owning the container's workloads. allOwned is
+// true only if every workload maps to a release.
+func (s *Scanner) helmOwners(ctx context.Context, c ContainerOutput) (refs []HelmRef, allOwned bool) {
+	if s.ownerResolver == nil || len(c.AffectedWorkloads) == 0 {
+		return nil, false
+	}
+	allOwned = true
+	seen := map[string]bool{}
+	for _, w := range c.AffectedWorkloads {
+		ref, ok := s.ownerResolver.HelmRelease(ctx, w)
+		if !ok {
+			allOwned = false
+			continue
+		}
+		if !seen[ref.Key()] {
+			seen[ref.Key()] = true
+			refs = append(refs, ref)
+		}
+	}
+	return refs, allOwned
+}
+
+// shouldSkipContainerForHelm returns true if every affected workload belongs to a Helm
+// release that is itself reported as outdated. Workloads that cannot be mapped to a
+// release keep the container reported.
+func shouldSkipContainerForHelm(owners []HelmRef, allOwned bool, skipReleases map[string]bool) bool {
+	if !allOwned || len(owners) == 0 {
+		return false
+	}
+	for _, ref := range owners {
+		if !skipReleases[ref.Key()] {
 			return false
 		}
 	}
 	return true
 }
 
-func (s *Scanner) shouldIgnoreRelease(release ReleaseOutput) bool {
-	for _, ignore := range s.config.IgnoreReleases {
-		if release.ReleaseName == ignore {
-			return true
-		}
-	}
-	for _, ignore := range s.config.IgnoreCharts {
-		if release.ChartName == ignore {
-			return true
-		}
-	}
-	return false
-}
-
-// shouldIgnoreContainer reports whether a container matches any ignoreImages pattern.
-//
-// Nova reports the image name without its tag (e.g. "ghcr.io/fluxcd/helm-controller")
-// and the versions separately. Patterns are therefore matched against both the bare
-// name and "name:<latest tag>", so that:
-//   - "ghcr.io/fluxcd/*" and "ghcr.io/fluxcd/*:*" both ignore every Flux image, and
-//   - "registry.k8s.io/sig-storage/csi-provisioner:v6*" only ignores proposed v6 updates.
-func (s *Scanner) shouldIgnoreContainer(container ContainerOutput) bool {
-	candidates := []string{container.Name}
-	if container.LatestTag != "" {
-		candidates = append(candidates, container.Name+":"+container.LatestTag)
-	}
-	for _, pattern := range s.config.IgnoreImages {
-		for _, c := range candidates {
-			if matchGlob(pattern, c) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// matchGlob matches an image reference against a glob pattern where "*" matches any
-// sequence of characters (including "/" and ":").
-//
-// Registry prefixes are optional:
-//   - "*/name" also matches a bare "name" (e.g. "*/busybox" matches "busybox")
-//   - a pattern not starting with "*" also matches after any "/" in s, so
-//     "grafana/rollout-operator:*" matches "docker.io/grafana/rollout-operator:v0.28.0"
-func matchGlob(pattern, s string) bool {
-	if wildcardMatch(pattern, s) {
-		return true
-	}
-	if strings.HasPrefix(pattern, "*/") && wildcardMatch(pattern[2:], s) {
-		return true
-	}
-	if pattern != "" && pattern[0] != '*' {
-		for i := 0; i < len(s); i++ {
-			if s[i] == '/' && wildcardMatch(pattern, s[i+1:]) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// wildcardMatch reports whether s matches pattern in full, where "*" matches any
-// (possibly empty) sequence of characters. All other characters match literally.
-func wildcardMatch(pattern, s string) bool {
-	p, i := 0, 0
-	star, mark := -1, 0
-	for i < len(s) {
-		switch {
-		case p < len(pattern) && pattern[p] == '*':
-			star, mark = p, i
-			p++
-		case p < len(pattern) && pattern[p] == s[i]:
-			p++
-			i++
-		case star >= 0:
-			p = star + 1
-			mark++
-			i = mark
-		default:
-			return false
-		}
-	}
-	for p < len(pattern) && pattern[p] == '*' {
-		p++
-	}
-	return p == len(pattern)
-}
-
-// expandTilde expands ~ to the user's home directory.
-func expandTilde(path string) string {
-	if path == "" {
-		return path
-	}
-	if path[0] == '~' {
-		if home, err := os.UserHomeDir(); err == nil {
-			return home + path[1:]
-		}
-	}
-	return path
-}
-
-// isRunningInCluster returns true if the process is running inside a Kubernetes cluster.
-// Detection is based on the presence of KUBERNETES_SERVICE_HOST environment variable,
-// which is automatically set by Kubernetes for all pods.
-func isRunningInCluster() bool {
-	return os.Getenv("KUBERNETES_SERVICE_HOST") != ""
-}
-
-// getKubeconfig determines the kubeconfig path to use.
-// Returns empty string when running in-cluster (nova will auto-detect).
-// Otherwise returns the configured path, KUBECONFIG env var, or default ~/.kube/config.
-func getKubeconfig(configuredPath string) string {
-	// If running in-cluster, return empty to let nova use in-cluster config
-	if isRunningInCluster() {
-		return ""
-	}
-
-	// Use explicitly configured path
-	if configuredPath != "" {
-		return expandTilde(configuredPath)
-	}
-
-	// Check KUBECONFIG env var
-	if envPath := os.Getenv("KUBECONFIG"); envPath != "" {
-		return expandTilde(envPath)
-	}
-
-	// Fall back to default path
-	if home, err := os.UserHomeDir(); err == nil {
-		return home + "/.kube/config"
-	}
-
-	return ""
-}
-
 // meetsMinSeverity checks if the version difference meets the minimum severity threshold.
+// Versions that cannot be parsed are always reported.
 func (s *Scanner) meetsMinSeverity(currentVersion, latestVersion string) bool {
-	current, err := semver.NewVersion(currentVersion)
-	if err != nil {
-		// If we can't parse the version, include it
+	sev := version.Severity(currentVersion, latestVersion)
+	if sev == version.SeverityUnknown {
 		return true
 	}
-
-	latest, err := semver.NewVersion(latestVersion)
-	if err != nil {
-		// If we can't parse the version, include it
-		return true
-	}
-
-	severity := calculateSeverity(current, latest)
-	return severity >= s.config.SeverityLevel()
-}
-
-// calculateSeverity determines the severity of a version difference.
-// Returns: 3 = critical (major), 2 = major (minor), 1 = minor (patch)
-func calculateSeverity(current, latest *semver.Version) int {
-	if latest.Major() > current.Major() {
-		return 3 // critical - major version bump
-	}
-	if latest.Minor() > current.Minor() {
-		return 2 // major - minor version bump
-	}
-	if latest.Patch() > current.Patch() {
-		return 1 // minor - patch version bump
-	}
-	return 0
+	return sev >= s.config.SeverityLevel()
 }

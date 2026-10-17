@@ -1,0 +1,151 @@
+[
+ {
+  "release": "alloy",
+  "chartName": "alloy",
+  "namespace": "alloy",
+  "description": "Grafana Alloy",
+  "icon": "https://raw.githubusercontent.com/grafana/alloy/main/docs/sources/assets/alloy_icon_orange.svg",
+  "Installed": {
+   "version": "1.13.0",
+   "appVersion": "v1.20.0",
+   "kubeVersion": ""
+  },
+  "Latest": {
+   "version": "1.13.1",
+   "appVersion": "v1.20.1",
+   "kubeVersion": ""
+  },
+  "outdated": true,
+  "deprecated": false,
+  "helmVersion": "3",
+  "overridden": false
+ },
+ {
+  "release": "cert-manager",
+  "chartName": "cert-manager",
+  "namespace": "cert-manager",
+  "description": "A Helm chart for cert-manager",
+  "home": "https://cert-manager.io",
+  "icon": "https://raw.githubusercontent.com/cert-manager/community/4d35a69437d21b76322157e6284be4cd64e6d2b7/logo/logo-small.png",
+  "Installed": {
+   "version": "v1.21.2",
+   "appVersion": "v1.21.2",
+   "kubeVersion": ">= 1.22.0-0"
+  },
+  "Latest": {
+   "version": "1.21.2",
+   "appVersion": "v1.21.2",
+   "kubeVersion": ">= 1.22.0-0"
+  },
+  "outdated": false,
+  "deprecated": false,
+  "helmVersion": "3",
+  "overridden": false
+ },
+ {
+  "release": "cloudspire",
+  "chartName": "cloudspire",
+  "namespace": "cloudspire",
+  "description": "Cloudspire Rules Reference web application",
+  "Installed": {
+   "version": "0.2.1+c1c9ca6773dd",
+   "appVersion": "0.2.1",
+   "kubeVersion": ""
+  },
+  "Latest": {
+   "version": "",
+   "appVersion": "",
+   "kubeVersion": ""
+  },
+  "outdated": false,
+  "deprecated": false,
+  "helmVersion": "3",
+  "overridden": false
+ },
+ {
+  "release": "envoy-gateway",
+  "chartName": "gateway-helm",
+  "namespace": "envoy-gateway-system",
+  "description": "The Helm chart for Envoy Gateway",
+  "home": "https://gateway.envoyproxy.io/",
+  "icon": "https://raw.githubusercontent.com/envoyproxy/gateway/main/site/assets/icons/logo.svg",
+  "Installed": {
+   "version": "1.9.2+be034275b55d",
+   "appVersion": "v1.9.2",
+   "kubeVersion": ""
+  },
+  "Latest": {
+   "version": "2023.9.18",
+   "appVersion": "v17.0.3",
+   "kubeVersion": ""
+  },
+  "outdated": true,
+  "deprecated": false,
+  "helmVersion": "3",
+  "overridden": false
+ },
+ {
+  "release": "homepage",
+  "chartName": "homepage",
+  "namespace": "homepage",
+  "description": "homepage helm chart for Kubernetes",
+  "home": "https://github.com/gethomepage/homepage",
+  "icon": "https://artifacthub.io/image/e417b561-5fe4-4ee3-9b89-f67df4069169",
+  "Installed": {
+   "version": "4.14.0+2a3a2f7bbf30",
+   "appVersion": "v1.13.2",
+   "kubeVersion": ">=1.23.0-0"
+  },
+  "Latest": {
+   "version": "5.6.0",
+   "appVersion": "v2.6.0",
+   "kubeVersion": ">=1.23.0-0"
+  },
+  "outdated": true,
+  "deprecated": false,
+  "helmVersion": "3",
+  "overridden": false
+ },
+ {
+  "release": "kutt",
+  "chartName": "kutt",
+  "namespace": "kutt",
+  "description": "Kutt is a free modern URL shortener.",
+  "home": "https://github.com/christianhuth/helm-charts",
+  "icon": "https://raw.githubusercontent.com/christianhuth/helm-charts/refs/heads/main/charts/kutt/icon.svg",
+  "Installed": {
+   "version": "9.11.2",
+   "appVersion": "v3.2.6",
+   "kubeVersion": ""
+  },
+  "Latest": {
+   "version": "10.0.0",
+   "appVersion": "v3.2.6",
+   "kubeVersion": ""
+  },
+  "outdated": true,
+  "deprecated": false,
+  "helmVersion": "3",
+  "overridden": false
+ },
+ {
+  "release": "synology-csi",
+  "chartName": "synology-csi",
+  "namespace": "synology-csi",
+  "description": "A Helm chart for the Synology CSI Driver",
+  "Installed": {
+   "version": "0.10.0+6547268b8037",
+   "appVersion": "v1.2.1",
+   "kubeVersion": ">= 1.20.0"
+  },
+  "Latest": {
+   "version": "",
+   "appVersion": "",
+   "kubeVersion": ""
+  },
+  "outdated": false,
+  "deprecated": false,
+  "helmVersion": "3",
+  "overridden": false
+ }
+]

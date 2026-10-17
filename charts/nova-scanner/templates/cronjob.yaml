@@ -43,16 +43,34 @@ spec:
               envFrom:
                 - secretRef:
                     name: {{ include "nova-scanner.secretName" . }}
+              {{- if .Values.registryAuth.existingSecret }}
+              env:
+                - name: DOCKER_CONFIG
+                  value: /docker-config
+              {{- end }}
               volumeMounts:
                 - name: config
                   mountPath: /config
                   readOnly: true
+                {{- if .Values.registryAuth.existingSecret }}
+                - name: registry-auth
+                  mountPath: /docker-config
+                  readOnly: true
+                {{- end }}
               resources:
                 {{- toYaml .Values.resources | nindent 16 }}
           volumes:
             - name: config
               configMap:
                 name: {{ include "nova-scanner.fullname" . }}-config
+            {{- if .Values.registryAuth.existingSecret }}
+            - name: registry-auth
+              secret:
+                secretName: {{ .Values.registryAuth.existingSecret }}
+                items:
+                  - key: .dockerconfigjson
+                    path: config.json
+            {{- end }}
           {{- with .Values.nodeSelector }}
           nodeSelector:
             {{- toYaml . | nindent 12 }}

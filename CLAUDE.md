@@ -179,7 +179,10 @@ Versions with a hyphen (e.g., `1.2.3-rc1`, `1.2.3-beta`) are treated as prerelea
 │   ├── github/           # GitHub issue creation
 │   ├── logging/          # Structured logging
 │   ├── metrics/          # Prometheus metrics
-│   └── nova/             # Nova CLI integration
+│   ├── nova/             # Nova CLI integration, update-target selection
+│   ├── flux/             # Latest chart versions from Flux HelmRepository/OCI sources
+│   ├── kube/             # Workload -> Helm release mapping (meta.helm.sh annotations)
+│   └── version/          # Tolerant version comparison (v-prefix, +build, suffix variants)
 ├── charts/nova-scanner/  # Helm chart
 ├── deploy/               # Raw Kubernetes manifests
 └── .github/workflows/    # CI/CD workflows

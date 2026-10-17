@@ -252,3 +252,23 @@ func TestFormatContainerIssueTitle(t *testing.T) {
 		t.Errorf("expected title %q, got %q", expected, title)
 	}
 }
+
+func TestFormatContainerIssueBody_AlternativesAndOwnership(t *testing.T) {
+	body := FormatContainerIssueBody(nova.ContainerOutput{
+		Name:             "grafana/loki",
+		CurrentTag:       "2.9.13",
+		LatestTag:        "2.9.17",
+		OverallLatestTag: "3.7.8",
+		LatestMinorTag:   "2.9.17",
+		OtherCurrentTags: []string{"2.9.10"},
+		HelmReleases:     []nova.HelmRef{{Release: "lgtm", Namespace: "lgtm"}},
+	})
+	for _, want := range []string{"Newest Tag (any major) | `3.7.8`", "Other Tags In Use | `2.9.10`", "`lgtm/lgtm`"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "same major") {
+		t.Error("tag equal to the target must not be repeated")
+	}
+}

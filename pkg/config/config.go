@@ -16,11 +16,11 @@ type Config struct {
 	Namespaces []string `yaml:"namespaces"` // empty = all namespaces
 
 	// Scanning
-	ScanHelm              bool     `yaml:"scanHelm"`
-	ScanContainers        bool     `yaml:"scanContainers"`
-	IgnoreReleases        []string `yaml:"ignoreReleases"`
-	IgnoreCharts          []string `yaml:"ignoreCharts"`
-	IgnoreImages          []string `yaml:"ignoreImages"`
+	ScanHelm                   bool                `yaml:"scanHelm"`
+	ScanContainers             bool                `yaml:"scanContainers"`
+	IgnoreReleases             []string            `yaml:"ignoreReleases"`
+	IgnoreCharts               []string            `yaml:"ignoreCharts"`
+	IgnoreImages               []string            `yaml:"ignoreImages"`
 	IgnoreVersionPatterns      []string            `yaml:"ignoreVersionPatterns"`      // Patterns to blacklist in target versions (e.g., "-develop", "-rc", "-alpha")
 	ChartVersionIgnorePatterns map[string][]string `yaml:"chartVersionIgnorePatterns"` // Per-chart version ignore patterns (chart name -> patterns)
 
@@ -47,6 +47,34 @@ type Config struct {
 	// Nova options
 	DesiredVersions map[string]string `yaml:"desiredVersions"`
 	PollArtifactHub bool              `yaml:"pollArtifactHub"`
+	// NovaTimeoutSeconds bounds the registry lookups of the container scan (nova's own default of 10s drops slow images).
+	NovaTimeoutSeconds int `yaml:"novaTimeoutSeconds"`
+
+	// Container update targets: "any" (newest tag, also across major versions), "minor"
+	// (newest tag within the current major) or "patch" (newest tag within the current minor).
+	ContainerUpdateScope string `yaml:"containerUpdateScope"`
+	// ImageUpdateScope overrides ContainerUpdateScope per image (glob pattern -> scope).
+	ImageUpdateScope map[string]string `yaml:"imageUpdateScope"`
+	// IgnoreWorkloadKinds skips containers whose workloads are all of these kinds
+	// (default: Node, i.e. static control-plane pods that GitOps cannot update).
+	IgnoreWorkloadKinds []string `yaml:"ignoreWorkloadKinds"`
+
+	// FluxResolver resolves the latest chart version from the Flux HelmRepository/OCIRepository
+	// a release is installed from, instead of guessing via ArtifactHub.
+	FluxResolver bool `yaml:"fluxResolver"`
+	// ChartSources pins the chart source for charts that Flux does not manage (chart name -> source).
+	ChartSources map[string]ChartSource `yaml:"chartSources"`
+	// HelmOwnerLookup maps container workloads to their Helm release via meta.helm.sh annotations.
+	HelmOwnerLookup bool `yaml:"helmOwnerLookup"`
+
+	// AutoCloseResolved closes open nova-scan issues whose component is no longer outdated.
+	AutoCloseResolved bool `yaml:"autoCloseResolved"`
+}
+
+// ChartSource describes where to look up the latest version of a chart.
+type ChartSource struct {
+	Type string `yaml:"type"` // "helm" (repository with index.yaml) or "oci"
+	URL  string `yaml:"url"`  // repository URL, or oci://host/path/chart for type oci
 }
 
 // IsMarkdownMode returns true if output mode is markdown.
@@ -62,9 +90,16 @@ func Load(path string) (*Config, error) {
 		ScanContainers:  false,
 		MinSeverity:     "minor",
 		PollArtifactHub: true,
-		LogLevel:        "info",
-		JobName:         "nova-scanner",
-		OutputMode:      "github",
+
+		NovaTimeoutSeconds:   120,
+		ContainerUpdateScope: "any",
+		IgnoreWorkloadKinds:  []string{"Node"},
+		FluxResolver:         true,
+		HelmOwnerLookup:      true,
+		AutoCloseResolved:    true,
+		LogLevel:             "info",
+		JobName:              "nova-scanner",
+		OutputMode:           "github",
 	}
 
 	if path != "" {
@@ -123,6 +158,9 @@ func (c *Config) applyEnvOverrides() {
 	if v := os.Getenv("SCAN_CONTAINERS"); v != "" {
 		c.ScanContainers = strings.ToLower(v) == "true" || v == "1"
 	}
+	if v := os.Getenv("AUTO_CLOSE_RESOLVED"); v != "" {
+		c.AutoCloseResolved = strings.ToLower(v) == "true" || v == "1"
+	}
 	if v := os.Getenv("MIN_SEVERITY"); v != "" {
 		c.MinSeverity = v
 	}
@@ -151,6 +189,24 @@ func (c *Config) validate() error {
 	validSeverities := map[string]bool{"minor": true, "major": true, "critical": true}
 	if !validSeverities[c.MinSeverity] {
 		return fmt.Errorf("invalid minSeverity: %s (must be minor, major, or critical)", c.MinSeverity)
+	}
+
+	validScopes := map[string]bool{"any": true, "major": true, "minor": true, "patch": true}
+	if !validScopes[c.ContainerUpdateScope] {
+		return fmt.Errorf("invalid containerUpdateScope: %s (must be any, minor, or patch)", c.ContainerUpdateScope)
+	}
+	for pattern, scope := range c.ImageUpdateScope {
+		if !validScopes[scope] {
+			return fmt.Errorf("invalid imageUpdateScope for %q: %s (must be any, minor, or patch)", pattern, scope)
+		}
+	}
+	for chart, src := range c.ChartSources {
+		if (src.Type != "helm" && src.Type != "oci") || src.URL == "" {
+			return fmt.Errorf("invalid chartSources for %q: type must be helm or oci and url is required", chart)
+		}
+	}
+	if c.NovaTimeoutSeconds <= 0 {
+		return fmt.Errorf("invalid novaTimeoutSeconds: %d (must be positive)", c.NovaTimeoutSeconds)
 	}
 
 	validOutputModes := map[string]bool{"github": true, "markdown": true}
@@ -199,6 +255,16 @@ func (c *Config) ShouldIgnoreChartVersion(chartName, version string) bool {
 			if strings.Contains(version, pattern) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// ShouldIgnoreWorkloadKind reports whether workloads of this kind are not scanned.
+func (c *Config) ShouldIgnoreWorkloadKind(kind string) bool {
+	for _, k := range c.IgnoreWorkloadKinds {
+		if strings.EqualFold(k, kind) {
+			return true
 		}
 	}
 	return false

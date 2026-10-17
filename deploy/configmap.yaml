@@ -17,6 +17,14 @@ data:
 
     # Nova options
     pollArtifactHub: true
+    novaTimeoutSeconds: 120
+
+    # Resolve latest chart versions from Flux sources; close issues of resolved components
+    fluxResolver: true
+    helmOwnerLookup: true
+    autoCloseResolved: true
+    ignoreWorkloadKinds:
+      - Node
 
     # Ignore lists
     ignoreReleases: []

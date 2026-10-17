@@ -486,3 +486,60 @@ func containsAt(s, substr string, start int) bool {
 	}
 	return false
 }
+
+func TestLoad_ScannerBehaviourOptions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	yaml := `outputMode: markdown
+containerUpdateScope: minor
+imageUpdateScope:
+  "*/postgres": patch
+ignoreWorkloadKinds: []
+autoCloseResolved: false
+chartSources:
+  foo:
+    type: oci
+    url: oci://ghcr.io/me/foo
+`
+	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ContainerUpdateScope != "minor" || cfg.ImageUpdateScope["*/postgres"] != "patch" || cfg.AutoCloseResolved {
+		t.Errorf("file values not applied: %+v", cfg)
+	}
+	if cfg.ShouldIgnoreWorkloadKind("Node") {
+		t.Error("an explicit empty ignoreWorkloadKinds must disable the default")
+	}
+	if !cfg.FluxResolver || !cfg.HelmOwnerLookup || cfg.NovaTimeoutSeconds != 120 {
+		t.Errorf("defaults lost: %+v", cfg)
+	}
+}
+
+func TestLoad_RejectsInvalidBehaviourOptions(t *testing.T) {
+	for name, yaml := range map[string]string{
+		"scope":       "outputMode: markdown\ncontainerUpdateScope: everything\n",
+		"image scope": "outputMode: markdown\nimageUpdateScope:\n  x: nope\n",
+		"chart type":  "outputMode: markdown\nchartSources:\n  c:\n    type: git\n    url: x\n",
+		"timeout":     "outputMode: markdown\nnovaTimeoutSeconds: 0\n",
+	} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(path); err == nil {
+			t.Errorf("%s: expected validation error", name)
+		}
+	}
+}
+
+func TestEnvOverride_AutoCloseResolved(t *testing.T) {
+	t.Setenv("AUTO_CLOSE_RESOLVED", "false")
+	cfg := &Config{AutoCloseResolved: true}
+	cfg.applyEnvOverrides()
+	if cfg.AutoCloseResolved {
+		t.Error("AUTO_CLOSE_RESOLVED=false must disable auto close")
+	}
+}

@@ -30,8 +30,38 @@ scanContainers: true
 # - critical: major version bumps only
 minSeverity: minor
 
+# Container update target: any (newest tag, may cross major versions), minor (same major), patch (same minor)
+containerUpdateScope: any
+# Per-image override of containerUpdateScope (glob pattern -> scope)
+imageUpdateScope: {}
+#  "*/postgres": minor
+#  "grafana/*": patch
+
+# Skip containers whose workloads are all of these kinds (Node = static control-plane pods)
+ignoreWorkloadKinds:
+  - Node
+
+# Seconds nova may spend on registry lookups (its own default of 10s drops slow registries)
+novaTimeoutSeconds: 120
+
 # Nova options
 pollArtifactHub: true
+
+# Resolve the latest chart version from the Flux HelmRepository/OCIRepository a release is
+# installed from instead of Nova's ArtifactHub name matching (needs the RBAC in deploy/rbac.yaml)
+fluxResolver: true
+
+# Chart sources for charts that Flux does not manage (chart name -> source)
+chartSources: {}
+#  my-chart:
+#    type: oci                          # helm | oci
+#    url: oci://ghcr.io/me/charts/my-chart
+
+# Map containers to their Helm release (meta.helm.sh annotations) to avoid duplicate issues
+helmOwnerLookup: true
+
+# Close open nova-scan issues whose component is no longer outdated
+autoCloseResolved: true
 
 # Desired versions override (pin specific charts to versions)
 # desiredVersions:

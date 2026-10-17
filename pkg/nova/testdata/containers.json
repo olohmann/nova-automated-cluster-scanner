@@ -1,0 +1,204 @@
+{
+ "container_images": [
+  {
+   "name": "ghcr.io/netbootxyz/netbootxyz",
+   "current_version": "0.7.6-nbxyz24",
+   "latest_version": "0.7.6-nbxyz9",
+   "latest_minor_version": "0.7.6-nbxyz24",
+   "latest_patch_version": "0.7.6-nbxyz24",
+   "outdated": true,
+   "affectedWorkloads": [
+    {
+     "name": "netbootxyz",
+     "namespace": "netbootxyz",
+     "kind": "Deployment",
+     "container": "netbootxyz"
+    }
+   ]
+  },
+  {
+   "name": "docker.io/memcached",
+   "current_version": "1.6.39-alpine",
+   "latest_version": "1.6.45",
+   "latest_minor_version": "1.6.45",
+   "latest_patch_version": "1.6.45",
+   "outdated": true,
+   "affectedWorkloads": [
+    {
+     "name": "lgtm-tempo-memcached",
+     "namespace": "lgtm",
+     "kind": "StatefulSet",
+     "container": "memcached"
+    }
+   ]
+  },
+  {
+   "name": "registry.k8s.io/kube-apiserver",
+   "current_version": "v1.35.7",
+   "latest_version": "v1.37.1",
+   "latest_minor_version": "v1.37.1",
+   "latest_patch_version": "v1.35.9",
+   "outdated": true,
+   "affectedWorkloads": [
+    {
+     "name": "kube-apiserver-node1",
+     "namespace": "kube-system",
+     "kind": "Node",
+     "container": "kube-apiserver"
+    }
+   ]
+  },
+  {
+   "name": "registry.k8s.io/sig-storage/csi-resizer",
+   "current_version": "v1.14.0",
+   "latest_version": "v2.3.0",
+   "latest_minor_version": "v1.14.0",
+   "latest_patch_version": "v1.14.0",
+   "outdated": true,
+   "affectedWorkloads": [
+    {
+     "name": "synology-csi-controller",
+     "namespace": "synology-csi",
+     "kind": "StatefulSet",
+     "container": "csi-resizer"
+    }
+   ]
+  },
+  {
+   "name": "coredns/coredns",
+   "current_version": "1.14.7",
+   "latest_version": "11.0.0",
+   "latest_minor_version": "1.14.7",
+   "latest_patch_version": "1.14.7",
+   "outdated": true,
+   "affectedWorkloads": [
+    {
+     "name": "coredns",
+     "namespace": "coredns",
+     "kind": "Deployment",
+     "container": "coredns"
+    }
+   ]
+  },
+  {
+   "name": "docker.io/nginxinc/nginx-unprivileged",
+   "current_version": "1.27.3-alpine",
+   "latest_version": "1.31.7",
+   "latest_minor_version": "1.31.7",
+   "latest_patch_version": "1.27.5",
+   "outdated": true,
+   "affectedWorkloads": [
+    {
+     "name": "lgtm-loki-gateway",
+     "namespace": "lgtm",
+     "kind": "Deployment",
+     "container": "nginx"
+    }
+   ]
+  },
+  {
+   "name": "ghcr.io/gethomepage/homepage",
+   "current_version": "v1.13.2",
+   "latest_version": "v2.6.0",
+   "latest_minor_version": "v1.13.2",
+   "latest_patch_version": "v1.13.2",
+   "outdated": true,
+   "affectedWorkloads": [
+    {
+     "name": "homepage",
+     "namespace": "homepage",
+     "kind": "Deployment",
+     "container": "homepage"
+    }
+   ]
+  },
+  {
+   "name": "ghcr.io/fluxcd/source-controller",
+   "current_version": "v1.8.1",
+   "latest_version": "v1.9.6",
+   "latest_minor_version": "v1.9.6",
+   "latest_patch_version": "v1.8.5",
+   "outdated": true,
+   "affectedWorkloads": [
+    {
+     "name": "source-controller",
+     "namespace": "flux-system",
+     "kind": "Deployment",
+     "container": "manager"
+    }
+   ]
+  },
+  {
+   "name": "registry.k8s.io/coredns/coredns",
+   "current_version": "v1.14.2",
+   "latest_version": "v1.14.7",
+   "latest_minor_version": "v1.14.7",
+   "latest_patch_version": "v1.14.7",
+   "outdated": true,
+   "affectedWorkloads": [
+    {
+     "name": "coredns",
+     "namespace": "kube-system",
+     "kind": "Deployment",
+     "container": "coredns"
+    }
+   ]
+  },
+  {
+   "name": "docker.io/grafana/alloy",
+   "current_version": "v1.20.0",
+   "latest_version": "v1.20.1",
+   "latest_minor_version": "v1.20.1",
+   "latest_patch_version": "v1.20.1",
+   "outdated": true,
+   "affectedWorkloads": [
+    {
+     "name": "alloy",
+     "namespace": "alloy",
+     "kind": "DaemonSet",
+     "container": "alloy"
+    }
+   ]
+  },
+  {
+   "name": "docker.io/grafana/loki",
+   "current_version": "2.9.13",
+   "latest_version": "3.7.8",
+   "latest_minor_version": "2.9.17",
+   "latest_patch_version": "2.9.17",
+   "outdated": true,
+   "affectedWorkloads": [
+    {
+     "name": "lgtm-loki-querier",
+     "namespace": "lgtm",
+     "kind": "StatefulSet",
+     "container": "querier"
+    },
+    {
+     "name": "lgtm-loki-distributor",
+     "namespace": "lgtm",
+     "kind": "Deployment",
+     "container": "distributor"
+    },
+    {
+     "name": "lgtm-loki-query-frontend",
+     "namespace": "lgtm",
+     "kind": "Deployment",
+     "container": "query-frontend"
+    },
+    {
+     "name": "lgtm-loki-ingester",
+     "namespace": "lgtm",
+     "kind": "StatefulSet",
+     "container": "ingester"
+    }
+   ]
+  }
+ ],
+ "err_images": [
+  {
+   "Image": "quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z",
+   "Err": "GET https://quay.io/v2/minio/minio/tags/list?n=1000: UNAUTHORIZED: access to the requested resource is not authorized; map[]"
+  }
+ ]
+}

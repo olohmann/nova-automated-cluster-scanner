@@ -4,11 +4,15 @@ Automated Kubernetes cluster scanner that detects outdated Helm charts and conta
 
 ## Features
 
-- **Helm Chart Scanning**: Detects outdated Helm releases by comparing against ArtifactHub
+- **Helm Chart Scanning**: Detects outdated Helm releases. Latest versions come from the
+  Flux `HelmRepository`/`OCIRepository` a release is installed from (falling back to
+  ArtifactHub for releases Flux does not manage); releases that cannot be checked are
+  reported instead of silently ignored
 - **GitHub Issue Creation**: Automatically creates issues with update checklists (Flux-aware)
 - **Issue Deduplication**: One issue per component — exact duplicates are skipped, a newer
   version retitles the existing issue (keeping its labels and discussion) and closes older
-  ones as superseded, and issues closed as *not planned* are not re-opened
+  ones as superseded, and issues closed as *not planned* are not re-opened. Issues are
+  closed automatically once the component is no longer outdated
 - **Prometheus Metrics**: Exposes metrics for monitoring and alerting
 - **Severity Filtering**: Filter by minor, major, or critical version changes
 - **Dry-run Mode**: Test without creating actual GitHub issues
@@ -178,8 +182,23 @@ ignoreVersionPatterns:  # Blacklist patterns for target versions
   - "-alpha"            # Skip alpha releases
   - "-beta"             # Skip beta releases
 
-# Severity: minor, major, critical
+# Severity: minor, major, critical (applies to Helm charts and container images)
 minSeverity: minor
+
+# Container update target: any (newest tag, may cross major versions), minor (same major),
+# patch (same minor). imageUpdateScope overrides it per image (glob -> scope).
+containerUpdateScope: any
+imageUpdateScope: {}   # e.g. {"*/postgres": "minor"}
+ignoreWorkloadKinds: [Node]   # skip static control-plane pods (not updatable via GitOps)
+novaTimeoutSeconds: 120       # registry lookups; nova's default of 10s silently drops slow registries
+
+# Helm chart sources
+fluxResolver: true    # latest version from Flux HelmRepository/OCIRepository (needs RBAC, see deploy/rbac.yaml)
+helmOwnerLookup: true # map containers to their Helm release via meta.helm.sh annotations
+chartSources: {}      # for charts Flux does not manage: {chart: {type: helm|oci, url: ...}}
+
+# Close open issues whose component is no longer outdated
+autoCloseResolved: true
 
 # GitHub
 githubToken: ""      # GitHub token (prefer env var)
@@ -196,8 +215,32 @@ logLevel: info       # debug, info, warn, error
 
 # Nova
 pollArtifactHub: true
-desiredVersions: {}  # Override target versions
+namespaces: []       # Namespaces to scan (empty = all)
+desiredVersions: {}  # Override target versions (chart name -> version)
 ```
+
+### How versions are determined
+
+- **Helm**: Nova lists the installed releases. The latest version is then taken from the
+  chart's real source: the Flux `HelmRelease` is mapped to its `HelmRepository`
+  (`index.yaml`) or OCI repository, and the newest *stable* version is used.
+  `chartSources` pins sources for charts Flux does not manage. Without either, Nova's
+  ArtifactHub name matching is used (shown as `Version Source` in the issue) - this guess can
+  pick an unrelated chart with the same name. Charts installed from a `GitRepository`, or
+  whose source cannot be read, are logged as *unresolved* (metric
+  `nova_unresolved_helm_releases`) and their issues are left untouched.
+- **Containers**: Nova proposes the newest tag; the scanner picks the update target according
+  to `containerUpdateScope`/`imageUpdateScope`, falls back to the same-major/same-minor tag if
+  the newest one is blacklisted, drops proposals that are not actually newer (e.g.
+  `-nbxyz24` -> `-nbxyz9`) or that would change the image variant (`1.2-alpine` -> `1.3`), and
+  applies `minSeverity`. Images that Nova cannot check (registry errors, timeouts, no
+  credentials) are logged, counted in `nova_errored_container_images` and never auto-closed.
+  Private registries need credentials: see `registryAuth.existingSecret` in the Helm chart
+  (a `dockerconfigjson` secret exposed via `DOCKER_CONFIG`).
+- **Helm vs. container issues**: a container is only skipped if *all* its workloads belong to a
+  Helm release that is itself reported as outdated. Otherwise the issue notes the owning release.
+- **Limitations of Nova**: images pinned by digest only, tagged `latest`, or with non-semver
+  tags are not checked.
 
 ### Ignoring images
 
@@ -231,6 +274,8 @@ and the versions separately. Each `ignoreImages` pattern is matched against both
 | `SCAN_HELM` | Enable Helm scanning (true/false) |
 | `SCAN_CONTAINERS` | Enable container scanning (true/false) |
 | `MIN_SEVERITY` | Minimum severity (minor, major, critical) |
+| `AUTO_CLOSE_RESOLVED` | Close issues of components that are no longer outdated (true/false) |
+| `DOCKER_CONFIG` | Directory with `config.json` registry credentials (read by Nova and the OCI chart lookup) |
 
 ## Metrics
 
@@ -244,6 +289,9 @@ and the versions separately. Each `ignoreImages` pattern is matched against both
 | `nova_scan_last_success_timestamp` | Gauge | Last successful scan timestamp |
 | `nova_issues_created_total` | Counter | GitHub issues created |
 | `nova_scan_errors_total` | Counter | Scan errors |
+| `nova_issues_closed_total` | Counter | GitHub issues closed because the component is no longer outdated |
+| `nova_unresolved_helm_releases` | Gauge | Helm releases whose latest version could not be determined |
+| `nova_errored_container_images` | Gauge | Container images Nova could not check |
 
 ## GitHub Issues
 
@@ -281,6 +329,8 @@ Import `deploy/grafana-dashboard.json` into Grafana to visualize:
 ├─────────────────────────────────────────────────────────┤
 │  cmd/scanner/main.go         - entrypoint, config       │
 │  pkg/nova/scanner.go         - Nova module integration  │
+│  pkg/flux, pkg/kube          - Flux sources, Helm owners│
+│  pkg/version                 - Version comparison       │
 │  pkg/github/issues.go        - GitHub issue creation    │
 │  pkg/metrics/prometheus.go   - Prometheus metrics       │
 │  pkg/logging/logger.go       - Structured logging       │

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -55,6 +56,11 @@ const (
 // FormatContainerIssueTitle (also accepts "->" for hand-written titles).
 var titlePattern = regexp.MustCompile(`^\[Nova\] Update (Helm chart|container image): (.+?) \((.+?) (?:→|->) (.+)\)$`)
 
+// markerPattern matches the hidden marker identifying the component an issue tracks.
+// Helm releases are identified as "helm|<namespace>/<release>", containers as
+// "container|<image>". Issues created before markers existed are matched via their title.
+var markerPattern = regexp.MustCompile(`<!-- nova-scanner:key=(.+?) -->`)
+
 // trackedIssue is an existing nova-scan issue parsed from GitHub.
 type trackedIssue struct {
 	number int
@@ -63,24 +69,37 @@ type trackedIssue struct {
 	key    string
 }
 
+// component identifies the thing an issue is about.
+type component struct {
+	kind string
+	// key is the stable identity written into the issue body.
+	key string
+	// legacyKey identifies issues created before body markers existed (title based).
+	legacyKey string
+}
+
 // issueIndex caches the repository's nova-scan issues for the duration of a run, so
 // deduplication needs one paginated list call instead of a search query per finding
 // (the search API is limited to 30 requests/minute).
 type issueIndex struct {
-	openByTitle map[string]*trackedIssue
-	openByKey   map[string][]*trackedIssue
-	dismissed   map[string]bool
+	openByKey map[string][]*trackedIssue
+	// dismissed holds "<key>\x00<title>" for issues closed as "not planned"; legacyDismissed
+	// holds the titles of such issues that carry no marker.
+	dismissed       map[string]bool
+	legacyDismissed map[string]bool
 }
 
 // IssueManager handles GitHub issue creation and deduplication.
 //
-// Deduplication rules, per component (Helm release name or container image name):
+// Deduplication rules, per component (Helm release namespace/name or container image name):
 //   - an open issue with the exact same title exists → skip
 //   - an issue with the exact same title was closed as "not planned" → skip (dismissed
 //     false positives are not re-opened every day)
 //   - open issues for the same component but another version exist → the newest one is
 //     retitled to the new versions and the others are closed as superseded
 //   - otherwise → create a new issue
+//
+// Open issues whose component is no longer reported are closed by CloseResolved.
 type IssueManager struct {
 	client *github.Client
 	owner  string
@@ -120,36 +139,79 @@ func newIssueManagerWithClient(client *github.Client, owner, repo string, dryRun
 
 // CreateHelmIssue creates or updates the GitHub issue for an outdated Helm release.
 func (im *IssueManager) CreateHelmIssue(ctx context.Context, release nova.ReleaseOutput) (IssueResult, error) {
-	return im.ensureIssue(ctx, kindHelm, release.ReleaseName,
+	return im.ensureIssue(ctx, HelmComponent(release),
 		FormatHelmIssueTitle(release), FormatHelmIssueBody(release),
 		[]string{labelNovaScan, labelClaudeCode, labelHelmUpdate})
 }
 
 // CreateContainerIssue creates or updates the GitHub issue for an outdated container image.
 func (im *IssueManager) CreateContainerIssue(ctx context.Context, container nova.ContainerOutput) (IssueResult, error) {
-	return im.ensureIssue(ctx, kindContainer, container.Name,
+	return im.ensureIssue(ctx, ContainerComponent(container.Name),
 		FormatContainerIssueTitle(container), FormatContainerIssueBody(container),
 		[]string{labelNovaScan, labelClaudeCode, labelContainerUpdate})
 }
 
-func (im *IssueManager) ensureIssue(ctx context.Context, kind, name, title, body string, labels []string) (IssueResult, error) {
+// HelmComponent returns the identity of a Helm release.
+func HelmComponent(release nova.ReleaseOutput) component {
+	return component{
+		kind:      kindHelm,
+		key:       componentKey(kindHelm, release.Namespace+"/"+release.ReleaseName),
+		legacyKey: componentKey(kindHelm, release.ReleaseName),
+	}
+}
+
+// ContainerComponent returns the identity of a container image.
+func ContainerComponent(image string) component {
+	k := componentKey(kindContainer, image)
+	return component{kind: kindContainer, key: k, legacyKey: k}
+}
+
+// ActiveKeys returns the component keys (current and legacy) of the given findings, for
+// use with CloseResolved. Extra components can be added with Add.
+type ActiveKeys map[string]bool
+
+// Add marks a component as still present.
+func (a ActiveKeys) Add(c component) {
+	a[c.key] = true
+	a[c.legacyKey] = true
+}
+
+// AddHelm marks a Helm release as still present.
+func (a ActiveKeys) AddHelm(release nova.ReleaseOutput) { a.Add(HelmComponent(release)) }
+
+// AddImage marks a container image (given with or without tag/digest) as still present.
+func (a ActiveKeys) AddImage(image string) { a.Add(ContainerComponent(nova.ImageRepo(image))) }
+
+func withMarker(body, key string) string {
+	return strings.TrimRight(body, "\n") + "\n\n<!-- nova-scanner:key=" + key + " -->\n"
+}
+
+func (im *IssueManager) ensureIssue(ctx context.Context, comp component, title, body string, labels []string) (IssueResult, error) {
 	if err := im.loadIndex(ctx); err != nil {
 		return IssueResult{}, fmt.Errorf("failed to load existing issues: %w", err)
 	}
 	idx := im.index
-	key := componentKey(kind, name)
+	kind := comp.kind
 
-	if existing, ok := idx.openByTitle[title]; ok {
-		im.logger.IssueSkipped(kind, title, "duplicate")
-		return IssueResult{Action: ActionSkipped, URL: existing.url, Reason: "duplicate"}, nil
+	open := idx.openByKey[comp.key]
+	if len(open) == 0 && comp.legacyKey != comp.key {
+		open = idx.openByKey[comp.legacyKey]
 	}
-	if idx.dismissed[title] {
+
+	for _, existing := range open {
+		if existing.title == title {
+			im.logger.IssueSkipped(kind, title, "duplicate")
+			return IssueResult{Action: ActionSkipped, URL: existing.url, Reason: "duplicate"}, nil
+		}
+	}
+	if idx.dismissed[comp.key+"\x00"+title] || idx.legacyDismissed[title] {
 		im.logger.IssueSkipped(kind, title, "dismissed")
 		return IssueResult{Action: ActionSkipped, Reason: "dismissed"}, nil
 	}
 
-	if open := idx.openByKey[key]; len(open) > 0 {
-		return im.updateExisting(ctx, kind, key, title, body, open)
+	body = withMarker(body, comp.key)
+	if len(open) > 0 {
+		return im.updateExisting(ctx, comp, title, body, open)
 	}
 
 	if im.dryRun {
@@ -172,14 +234,64 @@ func (im *IssueManager) ensureIssue(ctx context.Context, kind, name, title, body
 		return IssueResult{}, fmt.Errorf("failed to create issue: %w", err)
 	}
 
-	idx.add(&trackedIssue{number: issue.GetNumber(), title: title, url: issue.GetHTMLURL(), key: key})
+	idx.add(&trackedIssue{number: issue.GetNumber(), title: title, url: issue.GetHTMLURL(), key: comp.key})
 	im.logger.IssueCreated(kind, title, issue.GetHTMLURL())
 	return IssueResult{Action: ActionCreated, URL: issue.GetHTMLURL()}, nil
 }
 
+// CloseResolved closes open nova-scan issues of the given kind whose component is not in
+// active (i.e. it was updated, removed or is now ignored). Issues that cannot be
+// attributed to a component are left alone. It returns the number of closed issues.
+//
+// Callers must only invoke this after a complete, successful scan of that kind, and must
+// add every component whose state is unknown (scan errors, unresolved versions) to active.
+func (im *IssueManager) CloseResolved(ctx context.Context, kind string, active ActiveKeys) (int, error) {
+	if err := im.loadIndex(ctx); err != nil {
+		return 0, fmt.Errorf("failed to load existing issues: %w", err)
+	}
+	prefix := kind + "|"
+	var stale []*trackedIssue
+	for key, issues := range im.index.openByKey {
+		if !strings.HasPrefix(key, prefix) || active[key] {
+			continue
+		}
+		stale = append(stale, issues...)
+	}
+	sort.Slice(stale, func(i, j int) bool { return stale[i].number < stale[j].number })
+
+	closed := 0
+	for _, t := range stale {
+		if im.dryRun {
+			im.logger.IssueDryRun(kind, fmt.Sprintf("close resolved #%d %q", t.number, t.title))
+			continue
+		}
+		err := im.comment(ctx, t.number, "Closing: nova-scanner no longer reports this component as outdated (it was updated, removed, or is now ignored).")
+		if err != nil {
+			im.logger.Warn().Err(err).Int("issue", t.number).Msg("Failed to comment on resolved issue")
+			continue
+		}
+		err = im.withRetry(ctx, "close issue", func() (*github.Response, error) {
+			_, resp, err := im.client.Issues.Edit(ctx, im.owner, im.repo, t.number, &github.IssueRequest{
+				State:       github.String("closed"),
+				StateReason: github.String("completed"),
+			})
+			return resp, err
+		})
+		if err != nil {
+			im.logger.Warn().Err(err).Int("issue", t.number).Msg("Failed to close resolved issue")
+			continue
+		}
+		im.index.remove(t)
+		im.logger.IssueResolved(t.number, t.title)
+		closed++
+	}
+	return closed, nil
+}
+
 // updateExisting retitles the newest open issue for the component and closes older ones.
 // Updating in place keeps labels (e.g. risk assessments) and discussion on one issue.
-func (im *IssueManager) updateExisting(ctx context.Context, kind, key, title, body string, open []*trackedIssue) (IssueResult, error) {
+func (im *IssueManager) updateExisting(ctx context.Context, comp component, title, body string, open []*trackedIssue) (IssueResult, error) {
+	kind, key := comp.kind, comp.key
 	keep := open[0]
 	for _, o := range open[1:] {
 		if o.number > keep.number {
@@ -217,10 +329,12 @@ func (im *IssueManager) updateExisting(ctx context.Context, kind, key, title, bo
 		}
 	}
 
-	im.index.remove(keep)
+	for _, o := range open {
+		im.index.remove(o)
+	}
 	keep.title = title
-	im.index.openByKey[key] = []*trackedIssue{keep}
-	im.index.openByTitle[title] = keep
+	keep.key = key
+	im.index.add(keep)
 
 	im.logger.IssueUpdated(kind, title, previous, keep.url)
 	return IssueResult{Action: ActionUpdated, URL: keep.url}, nil
@@ -258,25 +372,29 @@ func (im *IssueManager) loadIndex(ctx context.Context) error {
 		return nil
 	}
 	idx := &issueIndex{
-		openByTitle: map[string]*trackedIssue{},
-		openByKey:   map[string][]*trackedIssue{},
-		dismissed:   map[string]bool{},
+		openByKey:       map[string][]*trackedIssue{},
+		dismissed:       map[string]bool{},
+		legacyDismissed: map[string]bool{},
 	}
 
+	open := 0
 	err := im.listIssues(ctx, "open", func(is *github.Issue) {
-		t := &trackedIssue{number: is.GetNumber(), title: is.GetTitle(), url: is.GetHTMLURL()}
-		if kind, name, ok := parseIssueTitle(t.title); ok {
-			t.key = componentKey(kind, name)
-		}
+		t := &trackedIssue{number: is.GetNumber(), title: is.GetTitle(), url: is.GetHTMLURL(), key: issueKey(is)}
 		idx.add(t)
+		open++
 	})
 	if err != nil {
 		return err
 	}
 
 	err = im.listIssues(ctx, "closed", func(is *github.Issue) {
-		if is.GetStateReason() == "not_planned" {
-			idx.dismissed[is.GetTitle()] = true
+		if is.GetStateReason() != "not_planned" {
+			return
+		}
+		if m := markerPattern.FindStringSubmatch(is.GetBody()); m != nil {
+			idx.dismissed[m[1]+"\x00"+is.GetTitle()] = true
+		} else {
+			idx.legacyDismissed[is.GetTitle()] = true
 		}
 	})
 	if err != nil {
@@ -284,8 +402,20 @@ func (im *IssueManager) loadIndex(ctx context.Context) error {
 	}
 
 	im.index = idx
-	im.logger.Debug().Int("open", len(idx.openByTitle)).Int("dismissed", len(idx.dismissed)).Msg("Loaded existing nova-scan issues")
+	im.logger.Debug().Int("open", open).Int("dismissed", len(idx.dismissed)+len(idx.legacyDismissed)).Msg("Loaded existing nova-scan issues")
 	return nil
+}
+
+// issueKey returns the component key of an issue: the body marker if present, otherwise
+// the legacy key parsed from the title ("" if the issue is not recognisable).
+func issueKey(is *github.Issue) string {
+	if m := markerPattern.FindStringSubmatch(is.GetBody()); m != nil {
+		return m[1]
+	}
+	if kind, name, ok := parseIssueTitle(is.GetTitle()); ok {
+		return componentKey(kind, name)
+	}
+	return ""
 }
 
 func (im *IssueManager) listIssues(ctx context.Context, state string, fn func(*github.Issue)) error {
@@ -364,23 +494,24 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 }
 
 func (idx *issueIndex) add(t *trackedIssue) {
-	idx.openByTitle[t.title] = t
 	if t.key != "" {
 		idx.openByKey[t.key] = append(idx.openByKey[t.key], t)
 	}
 }
 
 func (idx *issueIndex) remove(t *trackedIssue) {
-	delete(idx.openByTitle, t.title)
 	if t.key == "" {
 		return
 	}
 	list := idx.openByKey[t.key]
 	for i, o := range list {
 		if o == t {
-			idx.openByKey[t.key] = append(list[:i], list[i+1:]...)
+			idx.openByKey[t.key] = append(list[:i:i], list[i+1:]...)
 			break
 		}
+	}
+	if len(idx.openByKey[t.key]) == 0 {
+		delete(idx.openByKey, t.key)
 	}
 }
 
@@ -436,7 +567,7 @@ func FormatHelmIssueBody(release nova.ReleaseOutput) string {
 | Current Version | %s |
 | Latest Version | %s |
 | Deprecated | %s |
-
+%s
 ## Update Checklist
 
 - [ ] Review changelog for breaking changes between %s and %s
@@ -464,6 +595,7 @@ Update your HelmRelease manifest:
 		backtick(release.Installed.Version),
 		backtick(release.Latest.Version),
 		deprecated,
+		formatSourceRow(release.Source),
 		release.Installed.Version,
 		release.Latest.Version,
 		formatYAMLSnippet(release.Latest.Version, release.Installed.Version),
@@ -482,11 +614,11 @@ func FormatContainerIssueBody(container nova.ContainerOutput) string {
 | Image | %s |
 | Current Tag | %s |
 | Latest Tag | %s |
-
+%s
 ### Affected Workloads
 
 %s
-
+%s
 ## Update Checklist
 
 - [ ] Review release notes for breaking changes
@@ -501,8 +633,49 @@ func FormatContainerIssueBody(container nova.ContainerOutput) string {
 		backtick(container.Name),
 		backtick(container.CurrentTag),
 		backtick(container.LatestTag),
+		formatAlternativeTags(container),
 		workloadTable,
+		formatHelmOwners(container.HelmReleases),
 	)
+}
+
+func formatSourceRow(source string) string {
+	if source == "" {
+		return ""
+	}
+	return fmt.Sprintf("| Version Source | %s |\n", source)
+}
+
+// formatAlternativeTags lists the other candidate tags and further running tags.
+func formatAlternativeTags(c nova.ContainerOutput) string {
+	var sb strings.Builder
+	row := func(label, tag string) {
+		if tag != "" && tag != c.CurrentTag && tag != c.LatestTag {
+			sb.WriteString(fmt.Sprintf("| %s | %s |\n", label, backtick(tag)))
+		}
+	}
+	row("Newest Tag (any major)", c.OverallLatestTag)
+	row("Newest Tag (same major)", c.LatestMinorTag)
+	row("Newest Tag (same minor)", c.LatestPatchTag)
+	if len(c.OtherCurrentTags) > 0 {
+		tags := make([]string, len(c.OtherCurrentTags))
+		for i, t := range c.OtherCurrentTags {
+			tags[i] = backtick(t)
+		}
+		sb.WriteString(fmt.Sprintf("| Other Tags In Use | %s |\n", strings.Join(tags, ", ")))
+	}
+	return sb.String()
+}
+
+func formatHelmOwners(refs []nova.HelmRef) string {
+	if len(refs) == 0 {
+		return ""
+	}
+	names := make([]string, len(refs))
+	for i, r := range refs {
+		names[i] = backtick(r.Namespace + "/" + r.Release)
+	}
+	return fmt.Sprintf("\n### Helm Ownership\n\nManaged by Helm release %s. Update the chart if a newer chart ships this image, otherwise override the image tag in the release values.\n", strings.Join(names, ", "))
 }
 
 func backtick(s string) string {
